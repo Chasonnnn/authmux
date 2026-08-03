@@ -38,6 +38,16 @@ pub trait ProcessRunner {
     ) -> Result<ExecutionOutcome, ExecutionFailure>;
 }
 
+pub trait ExecutionContextResolver {
+    /// Re-resolves the selected Authentication Context immediately before spawn.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized execution failure when current configuration cannot
+    /// be resolved safely.
+    fn resolve_current(&self) -> Result<AuthenticationContext, ExecutionFailure>;
+}
+
 pub trait StatusAdapter {
     /// Produces a read-only Status Observation without refreshing credentials.
     ///
@@ -100,11 +110,15 @@ where
     ///
     /// Fails closed on identity mismatch, unusable evidence, provider failure,
     /// or child execution failure.
-    pub fn execute(
+    pub fn execute<C>(
         &self,
         context: &AuthenticationContext,
         command: &CommandSpec,
-    ) -> Result<ExecutionOutcome, ExecutionFailure> {
+        resolver: &C,
+    ) -> Result<ExecutionOutcome, ExecutionFailure>
+    where
+        C: ExecutionContextResolver,
+    {
         let observation = self
             .provider
             .observe(context)?
@@ -146,7 +160,12 @@ where
             return Err(ExecutionFailure::SessionIndeterminate { reason });
         }
 
-        let selection = self.provider.execution_selection(context)?;
+        let current_context = resolver.resolve_current()?;
+        if current_context != *context {
+            return Err(ExecutionFailure::ContextChanged);
+        }
+
+        let selection = self.provider.execution_selection(&current_context)?;
         self.runner.run(command, &selection)
     }
 }

@@ -72,7 +72,9 @@ authmux does not request login or capture the resulting Credential.
 
 Child processes inherit only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TERM`, plus
 the selected provider profile. Credential environment variables and unrelated
-parent state are removed.
+parent state are removed. Immediately before spawn, authmux re-reads the
+Project Binding and user configuration; a changed context fails closed and
+must be retried.
 
 The user configuration remains at
 `$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`. The

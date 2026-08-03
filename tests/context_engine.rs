@@ -2,9 +2,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use authmux::{
-    AuthenticationContext, CommandSpec, ContextEngine, EvidenceLevel, ExecutionFailure,
-    ExecutionOutcome, ExecutionSelection, ObservationReason, ObservedIdentity, ProcessRunner,
-    ProviderAdapter, ProviderFailure, ReauthenticationNeed, StatusObservation,
+    AuthenticationContext, CommandSpec, ContextEngine, EvidenceLevel, ExecutionContextResolver,
+    ExecutionFailure, ExecutionOutcome, ExecutionSelection, ObservationReason, ObservedIdentity,
+    ProcessRunner, ProviderAdapter, ProviderFailure, ReauthenticationNeed, StatusObservation,
 };
 
 struct FixedAwsAdapter {
@@ -79,6 +79,16 @@ struct RecordingRunner {
     called: Rc<Cell<bool>>,
 }
 
+struct FixedContextResolver {
+    context: AuthenticationContext,
+}
+
+impl ExecutionContextResolver for FixedContextResolver {
+    fn resolve_current(&self) -> Result<AuthenticationContext, ExecutionFailure> {
+        Ok(self.context.clone())
+    }
+}
+
 impl ProcessRunner for RecordingRunner {
     fn run(
         &self,
@@ -104,9 +114,12 @@ fn mismatched_observed_identity_refuses_child_execution() {
     let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
         .expect("fictional context is valid");
     let command = CommandSpec::new("aws", ["s3", "ls"]).expect("command is valid");
+    let resolver = FixedContextResolver {
+        context: context.clone(),
+    };
 
     let failure = engine
-        .execute(&context, &command)
+        .execute(&context, &command, &resolver)
         .expect_err("identity mismatch must fail closed");
 
     assert_eq!(
@@ -131,9 +144,12 @@ fn unusable_matching_session_refuses_child_execution() {
     let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
         .expect("fictional context is valid");
     let command = CommandSpec::new("aws", ["s3", "ls"]).expect("command is valid");
+    let resolver = FixedContextResolver {
+        context: context.clone(),
+    };
 
     let failure = engine
-        .execute(&context, &command)
+        .execute(&context, &command, &resolver)
         .expect_err("an unusable session must fail closed");
 
     assert_eq!(
@@ -158,9 +174,12 @@ fn indeterminate_session_refuses_child_execution() {
     let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
         .expect("fictional context is valid");
     let command = CommandSpec::new("aws", ["s3", "ls"]).expect("command is valid");
+    let resolver = FixedContextResolver {
+        context: context.clone(),
+    };
 
     let failure = engine
-        .execute(&context, &command)
+        .execute(&context, &command, &resolver)
         .expect_err("indeterminate usability must fail closed");
 
     assert_eq!(
@@ -169,5 +188,33 @@ fn indeterminate_session_refuses_child_execution() {
             reason: ObservationReason::InsufficientEvidence,
         }
     );
+    assert!(!runner_called.get(), "the child command must not run");
+}
+
+#[test]
+fn changed_context_after_provider_validation_refuses_child_execution() {
+    let runner_called = Rc::new(Cell::new(false));
+    let engine = ContextEngine::new(
+        FixedAwsAdapter {
+            observed_account: "111111111111".to_owned(),
+        },
+        RecordingRunner {
+            called: Rc::clone(&runner_called),
+        },
+    );
+    let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
+        .expect("fictional context is valid");
+    let changed_context = AuthenticationContext::aws("crm", "crm-production", "222222222222")
+        .expect("fictional changed context is valid");
+    let command = CommandSpec::new("aws", ["s3", "ls"]).expect("command is valid");
+    let resolver = FixedContextResolver {
+        context: changed_context,
+    };
+
+    let failure = engine
+        .execute(&context, &command, &resolver)
+        .expect_err("a context changed after observation must fail closed");
+
+    assert_eq!(failure, ExecutionFailure::ContextChanged);
     assert!(!runner_called.get(), "the child command must not run");
 }

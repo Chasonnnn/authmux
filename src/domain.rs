@@ -387,6 +387,8 @@ impl Error for ProviderFailure {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionFailure {
+    ContextResolution,
+    ContextChanged,
     IdentityMismatch {
         expected: String,
         observed: String,
@@ -405,6 +407,14 @@ pub enum ExecutionFailure {
 impl fmt::Display for ExecutionFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ContextResolution => write!(
+                formatter,
+                "refusing child execution: authentication context could not be re-resolved"
+            ),
+            Self::ContextChanged => write!(
+                formatter,
+                "refusing child execution: authentication context changed after provider validation; retry the command"
+            ),
             Self::IdentityMismatch { expected, observed } => write!(
                 formatter,
                 "refusing child execution: expected AWS account {expected}, but provider reported {observed}"

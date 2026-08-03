@@ -11,7 +11,8 @@ mod process_runner;
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
 pub use config::{ConfigFailure, ContextDefinition, ProjectBinding, UserConfig};
 pub use context_engine::{
-    ContextEngine, ProcessRunner, ProviderAdapter, StatusAdapter, StatusEngine,
+    ContextEngine, ExecutionContextResolver, ProcessRunner, ProviderAdapter, StatusAdapter,
+    StatusEngine,
 };
 pub use doctor::{AwsDoctor, DoctorCheck, DoctorOutcome, DoctorResult};
 pub use domain::{

@@ -12,8 +12,8 @@ use nix::unistd::Pid;
 
 use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
-    ContextListReport, DoctorOutcome, DoctorReport, ExecutionFailure, ProjectBinding,
-    SecureProcessRunner, StatusEngine, StatusReport, UserConfig,
+    ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
+    ProjectBinding, SecureProcessRunner, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -35,6 +35,9 @@ fn run() -> i32 {
 }
 
 fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
+    let current_resolver = CliExecutionContextResolver {
+        selection: selection.clone(),
+    };
     let selection = match resolve_selection(selection) {
         Ok(selection) => selection,
         Err(message) => {
@@ -73,7 +76,7 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
     };
     let engine = ContextEngine::new(AwsAdapter::new(probe_runner), child_runner);
 
-    match engine.execute(&context, command) {
+    match engine.execute(&context, command, &current_resolver) {
         Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
             (Some(exit_code), None) => exit_code,
             (None, Some(signal)) => terminate_with_signal(signal),
@@ -351,6 +354,21 @@ enum SelectionSource {
     ProjectBinding(PathBuf),
 }
 
+struct CliExecutionContextResolver {
+    selection: ContextSelection,
+}
+
+impl ExecutionContextResolver for CliExecutionContextResolver {
+    fn resolve_current(&self) -> Result<authmux::AuthenticationContext, ExecutionFailure> {
+        let selection = resolve_selection(self.selection.clone())
+            .map_err(|_| ExecutionFailure::ContextResolution)?;
+        let (config, _) = load_user_config().map_err(|_| ExecutionFailure::ContextResolution)?;
+        config
+            .resolve_context(&selection.context_name)
+            .map_err(|_| ExecutionFailure::ContextResolution)
+    }
+}
+
 fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
     match arguments.first().and_then(|argument| argument.to_str()) {
         Some("exec") => parse_exec(arguments)
@@ -536,6 +554,8 @@ fn user_config_path() -> PathBuf {
 
 fn exit_code(failure: &ExecutionFailure) -> i32 {
     match failure {
+        ExecutionFailure::ContextResolution => 2,
+        ExecutionFailure::ContextChanged => 6,
         ExecutionFailure::IdentityMismatch { .. } => 3,
         ExecutionFailure::SessionUnusable { .. }
         | ExecutionFailure::SessionIndeterminate { .. } => 4,

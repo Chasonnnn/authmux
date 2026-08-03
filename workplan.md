@@ -366,7 +366,8 @@ Deliverables:
 
 - [ ] Generalize `exec` from the proven AWS slice to multiple Provider Profiles.
 - [x] Define and test the environment inheritance allowlist.
-- [ ] Re-resolve the context immediately before process spawn.
+- [x] Re-resolve the context immediately before process spawn and fail closed
+  if the Project Binding, Provider Profile, or Expected Identity changed.
 - [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
   observations for every declared credential plane.
 - [ ] Keep GitHub and SSH evidence-only unless Phase 0 proves safe selection.

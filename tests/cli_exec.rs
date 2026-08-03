@@ -266,6 +266,38 @@ fn concurrent_contexts_keep_their_aws_profiles_isolated() {
     }
 }
 
+#[test]
+fn exec_refuses_a_context_changed_during_provider_validation() {
+    let fixture = FixtureDirectory::new("context-reresolution");
+    let bin_directory = fixture.configure_aws_that_rewrites_context();
+    let marker = fixture.path.join("child-ran-after-context-change");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "crm",
+            "--",
+            "/usr/bin/touch",
+            marker.to_str().expect("fixture marker is Unicode"),
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(6), "stderr: {stderr}");
+    assert_eq!(
+        stderr,
+        "refusing child execution: authentication context changed after provider validation; retry the command\n"
+    );
+    assert!(
+        !marker.exists(),
+        "a child must not run with a context changed after validation"
+    );
+}
+
 struct FixtureDirectory {
     path: PathBuf,
 }
@@ -355,6 +387,45 @@ impl FixtureDirectory {
              expected_account = \"222222222222\"\n",
         )
         .expect("fictional user config is written");
+
+        bin_directory
+    }
+
+    fn configure_aws_that_rewrites_context(&self) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        let config_directory = self.path.join("config").join("authmux");
+        fs::create_dir_all(&bin_directory).expect("fixture bin directory is created");
+        fs::create_dir_all(&config_directory).expect("fixture config directory is created");
+        let config_file = config_directory.join("config.toml");
+        fs::write(
+            &config_file,
+            "version = 1\n\
+             [contexts.crm.providers.aws]\n\
+             profile = \"crm-development\"\n\
+             expected_account = \"111111111111\"\n",
+        )
+        .expect("initial fictional user config is written");
+
+        let aws = bin_directory.join("aws");
+        fs::write(
+            &aws,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1 $2 $3 $4 $5 $6 $7 $8\" = \"sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt\" ]; then\n\
+                   printf 'version = 1\\n[contexts.crm.providers.aws]\\nprofile = \"crm-production\"\\nexpected_account = \"222222222222\"\\n' > '{}'\n\
+                   printf '111111111111\\n'\n\
+                   exit 0\n\
+                 fi\n\
+                 exit 64\n",
+                config_file.display()
+            ),
+        )
+        .expect("fictional rewriting AWS fixture is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fixture metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fictional aws fixture is executable");
 
         bin_directory
     }

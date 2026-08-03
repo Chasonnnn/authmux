@@ -1,5 +1,7 @@
 use std::ffi::OsString;
 use std::io::{self, Read};
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -142,14 +144,18 @@ impl ProcessRunner for SecureProcessRunner {
             ExecutionFailure::Process(format!("could not start child process ({})", error.kind()))
         })?;
 
-        status.code().map_or_else(
-            || {
-                Err(ExecutionFailure::Process(
-                    "child process ended without an exit code".to_owned(),
-                ))
-            },
-            |code| Ok(ExecutionOutcome::exited(code)),
-        )
+        if let Some(code) = status.code() {
+            return Ok(ExecutionOutcome::exited(code));
+        }
+
+        #[cfg(unix)]
+        if let Some(signal) = status.signal() {
+            return Ok(ExecutionOutcome::signaled(signal));
+        }
+
+        Err(ExecutionFailure::Process(
+            "child process ended without an exit code or signal".to_owned(),
+        ))
     }
 }
 

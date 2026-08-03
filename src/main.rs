@@ -4,6 +4,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::process;
 
+#[cfg(unix)]
+use nix::sys::signal::{Signal, kill};
+#[cfg(unix)]
+use nix::unistd::Pid;
+
 use authmux::{
     AwsAdapter, CommandSpec, ContextEngine, ExecutionFailure, ProjectBinding, SecureProcessRunner,
     UserConfig,
@@ -78,12 +83,30 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
     let engine = ContextEngine::new(AwsAdapter::new(probe_runner), child_runner);
 
     match engine.execute(&context, command) {
-        Ok(outcome) => outcome.exit_code(),
+        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
+            (Some(exit_code), None) => exit_code,
+            (None, Some(signal)) => terminate_with_signal(signal),
+            _ => 126,
+        },
         Err(failure) => {
             eprintln!("{failure}");
             exit_code(&failure)
         }
     }
+}
+
+#[cfg(unix)]
+fn terminate_with_signal(signal_number: i32) -> i32 {
+    if let Ok(signal) = Signal::try_from(signal_number) {
+        let _ = kill(Pid::this(), signal);
+    }
+
+    128_i32.saturating_add(signal_number)
+}
+
+#[cfg(not(unix))]
+fn terminate_with_signal(signal_number: i32) -> i32 {
+    128_i32.saturating_add(signal_number)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

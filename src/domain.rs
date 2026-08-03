@@ -266,18 +266,35 @@ impl ExecutionSelection {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExecutionOutcome {
-    exit_code: i32,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
 }
 
 impl ExecutionOutcome {
     #[must_use]
     pub fn exited(exit_code: i32) -> Self {
-        Self { exit_code }
+        Self {
+            exit_code: Some(exit_code),
+            signal: None,
+        }
     }
 
     #[must_use]
-    pub fn exit_code(self) -> i32 {
+    pub fn signaled(signal: i32) -> Self {
+        Self {
+            exit_code: None,
+            signal: Some(signal),
+        }
+    }
+
+    #[must_use]
+    pub fn exit_code(self) -> Option<i32> {
         self.exit_code
+    }
+
+    #[must_use]
+    pub fn signal(self) -> Option<i32> {
+        self.signal
     }
 }
 

@@ -25,9 +25,10 @@ selected account through the native AWS CLI, refuses an Expected Identity
 mismatch, and otherwise creates a process-scoped environment for one child
 command. A repository binding may select only a user-defined context; it cannot
 override providers or commands, is never discovered above the nearest `.git`
-root, and reports its canonical source path through the Config Module.
-`status`, `doctor`, `login`, and Google Cloud are still planned work. The
-`exec` preflight uses normal AWS CLI credential
+root, and reports its canonical source path through the Config Module. A
+matching child preserves its exit code or terminating Unix signal. `status`,
+`doctor`, `login`, and Google Cloud are still planned work. The `exec` preflight
+uses normal AWS CLI credential
 resolution, which may update AWS-owned caches under its documented behavior;
 authmux does not request login or capture the resulting Credential.
 
@@ -48,9 +49,10 @@ binding must make that decision explicitly.
 
 ## Current state
 
-The crate now contains the first test-driven AWS identity guard, bounded provider
-probe runner, strict user-config parser, and isolated child runner. It remains a
-development tracer rather than a released CLI.
+The crate now contains the first test-driven AWS identity guard, bounded
+provider probe runner, strict user and project config parsers, and isolated
+child runner with exit/signal parity. It remains a development tracer rather
+than a released CLI.
 
 Start here:
 

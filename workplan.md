@@ -524,9 +524,8 @@ A slice is complete only when:
 
 ## 17. Immediate next slice
 
-The fictional AWS tracer proves fail-closed mismatch behavior, a matching
-process-scoped execution path, and root-bounded Project Binding discovery. The
-Atmos and `direnv` comparison is complete. Before expanding the command surface
-or adding Google Cloud, complete the dated Phase 0 evidence matrix and close
-the remaining signal-forwarding acceptance criteria using only fictional or
-redacted evidence.
+The fictional AWS tracer proves fail-closed mismatch behavior, matching
+process-scoped execution with exit-code and Unix-signal parity, and root-bounded
+Project Binding discovery. The Atmos and `direnv` comparison is complete.
+Before expanding the command surface or adding Google Cloud, complete the dated
+Phase 0 evidence matrix using only fictional or redacted evidence.

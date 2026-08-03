@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -111,6 +112,31 @@ fn exec_does_not_search_for_a_binding_above_the_repository_root() {
         stderr,
         "project binding is not configured at the repository root\n"
     );
+}
+
+#[test]
+fn exec_terminates_with_the_child_signal() {
+    let fixture = FixtureDirectory::new("child-signal");
+    let bin_directory = fixture.configure_aws("111111111111");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "crm",
+            "--",
+            "/bin/sh",
+            "-c",
+            "kill -TERM $$",
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.signal(), Some(15), "stderr: {stderr}");
+    assert!(stderr.is_empty());
 }
 
 struct FixtureDirectory {

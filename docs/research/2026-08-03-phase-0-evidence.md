@@ -48,6 +48,10 @@ The versioned comparison is complete in
 It supports continuing only the narrow native-custody identity guard. Granted
 was not installed or configured, so it was correctly omitted from the control.
 
+The command, selector, side-effect, sensitivity, timeout, and failure-fixture
+decisions are consolidated in
+[`2026-08-03-provider-evidence-matrix.md`](./2026-08-03-provider-evidence-matrix.md).
+
 ## Provider feasibility
 
 ### AWS

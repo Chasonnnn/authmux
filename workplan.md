@@ -289,12 +289,12 @@ currently justifies promising an exact countdown.
 
 Deliverables:
 
-- [ ] Inventory the installed versions and supported non-secret status/login
+- [x] Inventory the installed versions and supported non-secret status/login
   commands for `aws`, `gcloud`, `gh`, and `ssh-add`.
 - [ ] Record redacted command-output fixtures for success, expiry, missing
   login, missing executable, timeout, malformed output, and unreachable
   service.
-- [ ] Confirm which selectors can be applied per process and which mutate
+- [x] Confirm which selectors can be applied per process and which mutate
   global state.
 - [ ] Prove native AWS profiles and modern IAM Identity Center behavior,
   including concurrent profiles that share one SSO session; add no first-class
@@ -308,7 +308,7 @@ Deliverables:
 - [ ] Treat gcloud CLI authentication and ADC as separate evidence surfaces;
   test selectors across representative client libraries without reading or
   printing credentials.
-- [ ] Limit SSH evidence to local readiness in 0.1; do not infer remote
+- [x] Limit SSH evidence to local readiness in 0.1; do not infer remote
   identity, MFA state, authorization, or expiry from agent inspection.
 - [ ] Validate the proposed status states against real provider evidence.
 - [ ] Create the Rust crate, CI, formatting, linting, and test harness under the
@@ -526,6 +526,8 @@ A slice is complete only when:
 
 The fictional AWS tracer proves fail-closed mismatch behavior, matching
 process-scoped execution with exit-code and Unix-signal parity, and root-bounded
-Project Binding discovery. The Atmos and `direnv` comparison is complete.
-Before expanding the command surface or adding Google Cloud, complete the dated
-Phase 0 evidence matrix using only fictional or redacted evidence.
+Project Binding discovery. The Atmos and `direnv` comparison and provider
+command matrix are complete. Implement `context show` next because it can
+explain intent and provenance without touching provider state. Keep `status`
+blocked on a separate local-metadata observation contract; do not reuse the
+potentially cache-refreshing `exec` preflight.

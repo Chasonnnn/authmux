@@ -70,6 +70,10 @@ uses normal AWS CLI credential
 resolution, which may update AWS-owned caches under its documented behavior;
 authmux does not request login or capture the resulting Credential.
 
+Child processes inherit only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TERM`, plus
+the selected provider profile. Credential environment variables and unrelated
+parent state are removed.
+
 The user configuration remains at
 `$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`. The
 optional root binding contains only:

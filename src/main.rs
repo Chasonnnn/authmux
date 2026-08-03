@@ -57,15 +57,14 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
         }
     };
 
-    let inherited = ["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
-    let probe_runner = match SecureProcessRunner::new(&inherited) {
+    let probe_runner = match SecureProcessRunner::for_authmux() {
         Ok(runner) => runner,
         Err(failure) => {
             eprintln!("{failure}");
             return 2;
         }
     };
-    let child_runner = match SecureProcessRunner::new(&inherited) {
+    let child_runner = match SecureProcessRunner::for_authmux() {
         Ok(runner) => runner,
         Err(failure) => {
             eprintln!("{failure}");
@@ -166,8 +165,7 @@ fn show_status(selection: ContextSelection, format: ReportFormat) -> i32 {
             return 2;
         }
     };
-    let inherited = ["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
-    let runner = match SecureProcessRunner::new(&inherited) {
+    let runner = match SecureProcessRunner::for_authmux() {
         Ok(runner) => runner,
         Err(failure) => {
             eprintln!("{failure}");
@@ -226,15 +224,14 @@ fn show_doctor(selection: ContextSelection, format: ReportFormat) -> i32 {
             return 2;
         }
     };
-    let inherited = ["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
-    let version_runner = match SecureProcessRunner::new(&inherited) {
+    let version_runner = match SecureProcessRunner::for_authmux() {
         Ok(runner) => runner,
         Err(failure) => {
             eprintln!("{failure}");
             return 2;
         }
     };
-    let status_runner = match SecureProcessRunner::new(&inherited) {
+    let status_runner = match SecureProcessRunner::for_authmux() {
         Ok(runner) => runner,
         Err(failure) => {
             eprintln!("{failure}");

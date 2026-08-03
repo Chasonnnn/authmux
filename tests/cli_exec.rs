@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -139,6 +140,132 @@ fn exec_terminates_with_the_child_signal() {
     assert!(stderr.is_empty());
 }
 
+#[test]
+fn exec_inherits_only_the_documented_environment_allowlist() {
+    let fixture = FixtureDirectory::new("environment-allowlist");
+    let bin_directory = fixture.configure_aws("111111111111");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["exec", "--context", "crm", "--", "/usr/bin/env"])
+        .env_clear()
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .env("HOME", "/fictional/home")
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("TERM", "xterm-fictional")
+        .env("AWS_SECRET_ACCESS_KEY", "fictional-secret-must-not-pass")
+        .env("AWS_SESSION_TOKEN", "fictional-session-must-not-pass")
+        .env("GH_TOKEN", "ghp_fictional_must_not_pass")
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("environment is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    let mut environment = stdout.lines().collect::<Vec<_>>();
+    environment.sort_unstable();
+    assert_eq!(
+        environment,
+        [
+            "AWS_PROFILE=crm-development",
+            "HOME=/fictional/home",
+            "LANG=C",
+            "LC_ALL=C",
+            &format!("PATH={}:/usr/bin:/bin", bin_directory.display()),
+            "TERM=xterm-fictional",
+        ]
+    );
+    assert!(!stdout.contains("fictional-secret-must-not-pass"));
+    assert!(!stdout.contains("fictional-session-must-not-pass"));
+    assert!(!stdout.contains("ghp_fictional_must_not_pass"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn exec_preserves_hostile_arguments_as_literal_values() {
+    let fixture = FixtureDirectory::new("literal-arguments");
+    let bin_directory = fixture.configure_aws("111111111111");
+    let marker = fixture.path.join("shell-interpolation-ran");
+    let shell_like = format!("$(touch {})", marker.display());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "crm",
+            "--",
+            "/usr/bin/printf",
+            "<%s>\n",
+            "space value",
+            "雪",
+            "--leading-dash",
+        ])
+        .arg(&shell_like)
+        .args(["semi;colon", "*"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("literal output is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        format!("<space value>\n<雪>\n<--leading-dash>\n<{shell_like}>\n<semi;colon>\n<*>\n")
+    );
+    assert!(
+        !marker.exists(),
+        "shell-shaped argument must remain literal"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn concurrent_contexts_keep_their_aws_profiles_isolated() {
+    let fixture = FixtureDirectory::new("concurrent-contexts");
+    let bin_directory = fixture.configure_two_aws_contexts();
+    let executable = PathBuf::from(env!("CARGO_BIN_EXE_authmux"));
+    let config_home = fixture.path.join("config");
+    let path = format!("{}:/usr/bin:/bin", bin_directory.display());
+
+    let handles = [
+        ("crm", "crm-development"),
+        ("analytics", "analytics-readonly"),
+    ]
+    .map(|(context, expected_profile)| {
+        let executable = executable.clone();
+        let config_home = config_home.clone();
+        let path = path.clone();
+        thread::spawn(move || {
+            let output = Command::new(executable)
+                .args([
+                    "exec",
+                    "--context",
+                    context,
+                    "--",
+                    "/usr/bin/printenv",
+                    "AWS_PROFILE",
+                ])
+                .env("XDG_CONFIG_HOME", config_home)
+                .env("PATH", path)
+                .output()
+                .expect("authmux runs");
+            (output, expected_profile)
+        })
+    });
+
+    for handle in handles {
+        let (output, expected_profile) = handle.join().expect("authmux thread completes");
+        let stdout = String::from_utf8(output.stdout).expect("profile output is UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+        assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+        assert_eq!(stdout, format!("{expected_profile}\n"));
+        assert!(stderr.is_empty());
+    }
+}
+
 struct FixtureDirectory {
     path: PathBuf,
 }
@@ -186,6 +313,46 @@ impl FixtureDirectory {
              [contexts.crm.providers.aws]\n\
              profile = \"crm-development\"\n\
              expected_account = \"111111111111\"\n",
+        )
+        .expect("fictional user config is written");
+
+        bin_directory
+    }
+
+    fn configure_two_aws_contexts(&self) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        let config_directory = self.path.join("config").join("authmux");
+        fs::create_dir_all(&bin_directory).expect("fixture bin directory is created");
+        fs::create_dir_all(&config_directory).expect("fixture config directory is created");
+
+        let aws = bin_directory.join("aws");
+        fs::write(
+            &aws,
+            "#!/bin/sh\n\
+             if [ \"$1 $2 $3 $4 $5 $6 $7 $8\" = \"sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt\" ]; then\n\
+               case \"$AWS_PROFILE\" in\n\
+                 crm-development) printf '111111111111\\n'; exit 0 ;;\n\
+                 analytics-readonly) printf '222222222222\\n'; exit 0 ;;\n\
+               esac\n\
+             fi\n\
+             exit 64\n",
+        )
+        .expect("fictional aws fixture is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fixture metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fictional aws fixture is executable");
+
+        fs::write(
+            config_directory.join("config.toml"),
+            "version = 1\n\
+             [contexts.crm.providers.aws]\n\
+             profile = \"crm-development\"\n\
+             expected_account = \"111111111111\"\n\
+             [contexts.analytics.providers.aws]\n\
+             profile = \"analytics-readonly\"\n\
+             expected_account = \"222222222222\"\n",
         )
         .expect("fictional user config is written");
 

@@ -275,6 +275,7 @@ currently justifies promising an exact countdown.
 
 - Argument-vector process execution and executable allowlisting/discovery.
 - Minimal environment construction with a user-owned inheritance allowlist;
+  production inherits only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TERM`, and
   repository configuration cannot add inherited variable names.
 - Output caps, timeouts, control-character handling, and redaction.
 - Config trust messaging and an inspectable resolution report.
@@ -364,13 +365,13 @@ Exit criteria:
 Deliverables:
 
 - [ ] Generalize `exec` from the proven AWS slice to multiple Provider Profiles.
-- [ ] Define and test the environment inheritance allowlist.
+- [x] Define and test the environment inheritance allowlist.
 - [ ] Re-resolve the context immediately before process spawn.
 - [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
   observations for every declared credential plane.
 - [ ] Keep GitHub and SSH evidence-only unless Phase 0 proves safe selection.
 - [ ] Refuse unsafe global switching by default.
-- [ ] Add cross-context concurrency tests and hostile argument tests.
+- [x] Add cross-context concurrency tests and hostile argument tests.
 
 Exit criteria:
 

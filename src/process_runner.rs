@@ -122,6 +122,19 @@ pub struct SecureProcessRunner {
 }
 
 impl SecureProcessRunner {
+    /// Creates the production runner with authmux's fixed inheritance policy.
+    ///
+    /// The child can locate native tools, use the user's provider-owned home,
+    /// and retain basic locale/terminal behavior. Authentication and
+    /// credential environment variables are intentionally excluded.
+    ///
+    /// # Errors
+    ///
+    /// Returns a domain failure if the checked-in policy is invalid.
+    pub fn for_authmux() -> Result<Self, DomainFailure> {
+        Self::new(&["PATH", "HOME", "LANG", "LC_ALL", "TERM"])
+    }
+
     /// Creates a runner with a user-owned environment inheritance allowlist.
     ///
     /// # Errors

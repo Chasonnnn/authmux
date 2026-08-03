@@ -1,0 +1,20 @@
+[package]
+name = "authmux"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT"
+description = "Guard local commands with explicit native authentication contexts"
+repository = "https://github.com/Chasonnnn/authmux"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+wait-timeout = "0.2.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

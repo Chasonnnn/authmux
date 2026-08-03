@@ -1,33 +1,31 @@
 # authmux
 
-`authmux` is a planned local-first CLI for understanding, refreshing, and
-selecting authentication contexts across developer tools without becoming a
-credential vault itself.
+`authmux` is an early local-first CLI for verifying and selecting authentication
+contexts across developer tools without becoming a credential vault itself.
 
 The repository is private during design and early validation. The code and
 documentation are licensed under the MIT License so the project can be opened
 when its security model and provider behavior are ready for public scrutiny.
 
-## Intended experience
+## Current tracer
 
 ```console
-authmux status
-authmux doctor
-authmux login work-aws
-authmux exec research-gcp -- gcloud storage ls
-authmux exec crm-github -- gh repo view
+authmux exec crm -- aws s3 ls
 ```
 
-Native tools retain credential custody: AWS tooling, `gcloud`, `gh`, SSH
-agents, and similar systems continue to store and refresh their own sessions.
-`authmux` reads safe status signals, invokes native login flows, and creates a
-process-scoped environment for the selected project context.
+The implemented AWS-first tracer reads a user-owned context, observes the
+selected account through the native AWS CLI, refuses an Expected Identity
+mismatch, and otherwise creates a process-scoped environment for one child
+command. `status`, `doctor`, `login`, repository binding, and Google Cloud are
+still planned work. The `exec` preflight uses normal AWS CLI credential
+resolution, which may update AWS-owned caches under its documented behavior;
+authmux does not request login or capture the resulting Credential.
 
 ## Current state
 
-This initial commit establishes the product definition, terminology,
-architecture decision, engineering rules, and phased execution plan. No
-credential-handling implementation exists yet.
+The crate now contains the first test-driven AWS identity guard, bounded provider
+probe runner, strict user-config parser, and isolated child runner. It remains a
+development tracer rather than a released CLI.
 
 Start here:
 
@@ -35,6 +33,7 @@ Start here:
 - [CONTEXT.md](CONTEXT.md) — canonical product language
 - [AGENTS.md](AGENTS.md) — repository operating contract
 - [ADR 0001](docs/adr/0001-delegate-credential-custody.md) — credential-custody decision
+- [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 
 ## License
 

@@ -1,0 +1,12 @@
+context: crm
+provider: aws
+profile: crm-development
+expected identity: 111111111111
+observed identity: 111111111111
+identity match: match
+session usability: indeterminate
+reason: insufficient_evidence
+reauthentication need: unknown
+evidence level: local_metadata
+provider contacted: no
+observed at unix: <observed_at_unix>

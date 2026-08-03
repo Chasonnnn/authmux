@@ -4,6 +4,7 @@ mod aws_adapter;
 mod config;
 mod context_engine;
 mod domain;
+mod presentation;
 mod process_runner;
 
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
@@ -16,5 +17,6 @@ pub use domain::{
     ExecutionOutcome, ExecutionSelection, IdentityMatch, ObservationReason, ObservedIdentity,
     ProviderFailure, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
+pub use presentation::{PresentationFailure, StatusReport};
 pub use process_runner::SecureProcessRunner;
 pub use process_runner::{ProbeOutput, ProbePolicy, ProbeRunner};

@@ -21,18 +21,33 @@ fn status_reports_matching_local_metadata_without_calling_sts() {
     let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
     assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert!(stdout.contains("context: crm\n"));
-    assert!(stdout.contains("provider: aws\n"));
-    assert!(stdout.contains("profile: crm-development\n"));
-    assert!(stdout.contains("expected identity: 111111111111\n"));
-    assert!(stdout.contains("observed identity: 111111111111\n"));
-    assert!(stdout.contains("identity match: match\n"));
-    assert!(stdout.contains("session usability: indeterminate\n"));
-    assert!(stdout.contains("reason: insufficient_evidence\n"));
-    assert!(stdout.contains("reauthentication need: unknown\n"));
-    assert!(stdout.contains("evidence level: local_metadata\n"));
-    assert!(stdout.contains("provider contacted: no\n"));
-    assert!(stdout.contains("observed at unix: "));
+    assert_eq!(
+        normalize_human_observation_time(&stdout),
+        include_str!("fixtures/golden/status-human.txt")
+    );
+    assert!(stderr.is_empty());
+    assert!(!sts_marker.exists(), "read-only status must not call STS");
+}
+
+#[test]
+fn json_status_matches_the_versioned_schema_golden() {
+    let fixture = FixtureDirectory::new("status-json");
+    let (bin_directory, sts_marker) = fixture.configure(Some("111111111111"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["status", "--context", "crm", "--json"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        normalize_json_observation_time(&stdout),
+        include_str!("fixtures/golden/status-json.json")
+    );
     assert!(stderr.is_empty());
     assert!(!sts_marker.exists(), "read-only status must not call STS");
 }
@@ -78,6 +93,29 @@ fn malformed_local_metadata_is_not_exposed_by_the_cli() {
     assert!(stdout.contains("observed identity: not observed\n"));
     assert!(stdout.contains("identity match: unverified\n"));
     assert!(stdout.contains("reason: provider_error\n"));
+    assert!(!stdout.contains(SENSITIVE_FIXTURE));
+    assert!(!stderr.contains(SENSITIVE_FIXTURE));
+    assert!(!sts_marker.exists(), "read-only status must not call STS");
+}
+
+#[test]
+fn malformed_local_metadata_is_not_exposed_by_json() {
+    const SENSITIVE_FIXTURE: &str = "111111111111 unexpected-sensitive-metadata";
+    let fixture = FixtureDirectory::new("status-malformed-json");
+    let (bin_directory, sts_marker) = fixture.configure(Some(SENSITIVE_FIXTURE));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["status", "--json", "--context", "crm"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("\"observed_identity\": null"));
+    assert!(stdout.contains("\"reason\": \"provider_error\""));
     assert!(!stdout.contains(SENSITIVE_FIXTURE));
     assert!(!stderr.contains(SENSITIVE_FIXTURE));
     assert!(!sts_marker.exists(), "read-only status must not call STS");
@@ -153,4 +191,34 @@ fn remove_fixture(path: &Path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("fixture cleanup failed: {error}"),
     }
+}
+
+fn normalize_human_observation_time(report: &str) -> String {
+    report
+        .lines()
+        .map(|line| {
+            if line.starts_with("observed at unix: ") {
+                "observed at unix: <observed_at_unix>"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+fn normalize_json_observation_time(report: &str) -> String {
+    report
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("\"observed_at_unix\": ") {
+                "      \"observed_at_unix\": 0"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }

@@ -342,7 +342,7 @@ Deliverables:
 - [x] Implement read-only `status` using a local-metadata observation contract,
   not the cache-refreshing execution preflight.
 - [x] Add the AWS Provider Adapter from Phase 0 evidence.
-- [ ] Add stable JSON schemas and terminal golden tests.
+- [x] Add the stable status JSON schema and terminal golden tests.
 
 Exit criteria:
 

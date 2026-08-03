@@ -1,0 +1,203 @@
+use std::error::Error;
+use std::fmt::{self, Write as _};
+use std::time::UNIX_EPOCH;
+
+use serde::Serialize;
+
+use crate::{
+    AuthenticationContext, EvidenceLevel, IdentityMatch, ObservationReason, ReauthenticationNeed,
+    SessionUsability, StatusObservation,
+};
+
+const STATUS_SCHEMA_VERSION: u32 = 1;
+
+pub struct StatusReport {
+    context: String,
+    observation: StatusEntry,
+}
+
+#[derive(Serialize)]
+struct StatusDocument<'a> {
+    schema_version: u32,
+    command: &'static str,
+    context: &'a str,
+    observations: [&'a StatusEntry; 1],
+}
+
+#[derive(Serialize)]
+struct StatusEntry {
+    provider: &'static str,
+    profile: String,
+    expected_identity: String,
+    observed_identity: Option<String>,
+    identity_match: &'static str,
+    session_usability: &'static str,
+    reason: &'static str,
+    reauthentication_need: &'static str,
+    evidence_level: &'static str,
+    provider_contacted: bool,
+    observed_at_unix: u64,
+}
+
+impl StatusReport {
+    /// Builds the presentation-safe report for a local AWS Status Observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the observation time cannot be represented
+    /// in the versioned output schema.
+    pub fn local_aws(
+        context: &AuthenticationContext,
+        observation: &StatusObservation,
+    ) -> Result<Self, PresentationFailure> {
+        let observed_at_unix = observation
+            .observed_at()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| PresentationFailure::new("status observation time is invalid"))?
+            .as_secs();
+
+        Ok(Self {
+            context: context.name().to_owned(),
+            observation: StatusEntry {
+                provider: "aws",
+                profile: context.provider_profile().to_owned(),
+                expected_identity: context.expected_account().to_owned(),
+                observed_identity: observation
+                    .observed_identity()
+                    .map(|identity| identity.account().to_owned()),
+                identity_match: identity_match(observation.identity_match()),
+                session_usability: session_usability(observation.usability()),
+                reason: observation_reason(observation.reason()),
+                reauthentication_need: reauthentication_need(observation.reauthentication_need()),
+                evidence_level: evidence_level(observation.evidence_level()),
+                provider_contacted: false,
+                observed_at_unix,
+            },
+        })
+    }
+
+    #[must_use]
+    pub fn render_human(&self) -> String {
+        let entry = &self.observation;
+        let mut report = String::new();
+        writeln!(report, "context: {}", self.context).expect("writing to a String cannot fail");
+        writeln!(report, "provider: {}", entry.provider).expect("writing to a String cannot fail");
+        writeln!(report, "profile: {}", entry.profile).expect("writing to a String cannot fail");
+        writeln!(report, "expected identity: {}", entry.expected_identity)
+            .expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "observed identity: {}",
+            entry.observed_identity.as_deref().unwrap_or("not observed")
+        )
+        .expect("writing to a String cannot fail");
+        writeln!(report, "identity match: {}", entry.identity_match)
+            .expect("writing to a String cannot fail");
+        writeln!(report, "session usability: {}", entry.session_usability)
+            .expect("writing to a String cannot fail");
+        writeln!(report, "reason: {}", entry.reason).expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "reauthentication need: {}",
+            entry.reauthentication_need
+        )
+        .expect("writing to a String cannot fail");
+        writeln!(report, "evidence level: {}", entry.evidence_level)
+            .expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "provider contacted: {}",
+            if entry.provider_contacted {
+                "yes"
+            } else {
+                "no"
+            }
+        )
+        .expect("writing to a String cannot fail");
+        writeln!(report, "observed at unix: {}", entry.observed_at_unix)
+            .expect("writing to a String cannot fail");
+        report
+    }
+
+    /// Serializes the stable status schema without terminal styling.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the fixed report structure cannot be
+    /// serialized.
+    pub fn render_json(&self) -> Result<String, PresentationFailure> {
+        let document = StatusDocument {
+            schema_version: STATUS_SCHEMA_VERSION,
+            command: "status",
+            context: &self.context,
+            observations: [&self.observation],
+        };
+        let mut json = serde_json::to_string_pretty(&document)
+            .map_err(|_| PresentationFailure::new("could not serialize status report"))?;
+        json.push('\n');
+        Ok(json)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PresentationFailure {
+    message: &'static str,
+}
+
+impl PresentationFailure {
+    fn new(message: &'static str) -> Self {
+        Self { message }
+    }
+}
+
+impl fmt::Display for PresentationFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.message)
+    }
+}
+
+impl Error for PresentationFailure {}
+
+const fn identity_match(value: IdentityMatch) -> &'static str {
+    match value {
+        IdentityMatch::Match => "match",
+        IdentityMatch::Mismatch => "mismatch",
+        IdentityMatch::Unverified => "unverified",
+    }
+}
+
+const fn session_usability(value: SessionUsability) -> &'static str {
+    match value {
+        SessionUsability::Usable => "usable",
+        SessionUsability::Unusable => "unusable",
+        SessionUsability::Indeterminate => "indeterminate",
+    }
+}
+
+const fn observation_reason(value: Option<ObservationReason>) -> &'static str {
+    match value {
+        Some(ObservationReason::Expired) => "expired",
+        Some(ObservationReason::Missing) => "missing",
+        Some(ObservationReason::Unreachable) => "unreachable",
+        Some(ObservationReason::ProviderError) => "provider_error",
+        Some(ObservationReason::InsufficientEvidence) => "insufficient_evidence",
+        None => "none",
+    }
+}
+
+const fn reauthentication_need(value: ReauthenticationNeed) -> &'static str {
+    match value {
+        ReauthenticationNeed::Required => "required",
+        ReauthenticationNeed::NotRequired => "not_required",
+        ReauthenticationNeed::Unknown => "unknown",
+        ReauthenticationNeed::NotApplicable => "not_applicable",
+    }
+}
+
+const fn evidence_level(value: EvidenceLevel) -> &'static str {
+    match value {
+        EvidenceLevel::LocalMetadata => "local_metadata",
+        EvidenceLevel::ProviderValidation => "provider_validation",
+        EvidenceLevel::ConnectivityOnly => "connectivity_only",
+    }
+}

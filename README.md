@@ -33,12 +33,18 @@ refreshing a Session:
 ```console
 authmux status
 authmux status --context crm
+authmux status --context crm --json
 ```
 
 This status can detect whether an IAM Identity Center profile's configured
 account matches the Expected Identity. It always reports Session Usability as
 `indeterminate`; use guarded `exec` when provider-validated identity evidence is
 required.
+
+JSON output follows the checked-in, versioned
+[`status-v1` schema](docs/schemas/status-v1.schema.json). Human and JSON reports
+are rendered from the same typed observation; neither includes raw provider
+output.
 
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity

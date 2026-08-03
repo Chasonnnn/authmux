@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chasonnnn/authmux/blob/main/docs/schemas/status-v1.schema.json",
+  "title": "authmux status schema version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "command", "context", "observations"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "command": { "const": "status" },
+    "context": { "type": "string", "minLength": 1 },
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/observation" }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "profile",
+        "expected_identity",
+        "observed_identity",
+        "identity_match",
+        "session_usability",
+        "reason",
+        "reauthentication_need",
+        "evidence_level",
+        "provider_contacted",
+        "observed_at_unix"
+      ],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "expected_identity": { "type": "string", "minLength": 1 },
+        "observed_identity": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "identity_match": {
+          "enum": ["match", "mismatch", "unverified"]
+        },
+        "session_usability": {
+          "enum": ["usable", "unusable", "indeterminate"]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "expired",
+            "missing",
+            "unreachable",
+            "provider_error",
+            "insufficient_evidence"
+          ]
+        },
+        "reauthentication_need": {
+          "enum": ["required", "not_required", "unknown", "not_applicable"]
+        },
+        "evidence_level": {
+          "enum": [
+            "local_metadata",
+            "provider_validation",
+            "connectivity_only"
+          ]
+        },
+        "provider_contacted": { "type": "boolean" },
+        "observed_at_unix": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

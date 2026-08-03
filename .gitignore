@@ -1,0 +1,13 @@
+.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+target/
+dist/
+coverage/
+*.log
+
+# Local authmux configuration can name private organizations and projects.
+.authmux.toml

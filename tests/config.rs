@@ -45,6 +45,26 @@ fn secret_shaped_user_context_name_is_rejected_without_echoing_it() {
 }
 
 #[test]
+fn terminal_controls_in_display_metadata_are_rejected_without_echoing_them() {
+    let seeded_control = "\u{1b}[31mfictional";
+    let source = "version = 1\n\
+                  [contexts.crm]\n\
+                  description = \"\\u001b[31mfictional\"\n\
+                  [contexts.crm.providers.aws]\n\
+                  profile = \"crm-development\"\n\
+                  expected_account = \"111111111111\"\n";
+
+    let failure = UserConfig::parse(source).expect_err("terminal controls must be rejected");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "user configuration contains unsafe display metadata"
+    );
+    assert!(!diagnostic.contains(seeded_control));
+}
+
+#[test]
 fn display_description_does_not_change_context_resolution() {
     let source = "version = 1\n\
                   [contexts.crm]\n\
@@ -144,6 +164,25 @@ fn symlinked_project_binding_is_rejected() {
     assert_eq!(
         failure.to_string(),
         "project configuration must be a regular file"
+    );
+}
+
+#[test]
+fn terminal_controls_in_project_context_are_rejected() {
+    let fixture = FixtureDirectory::new("binding-terminal-control");
+    fs::create_dir_all(fixture.path.join(".git")).expect("repository marker is created");
+    fs::write(
+        fixture.path.join(".authmux.toml"),
+        "version = 1\n[project]\ncontext = \"\\u001b[31mcrm\"\n",
+    )
+    .expect("unsafe binding is written");
+
+    let failure = ProjectBinding::discover(&fixture.path)
+        .expect_err("terminal controls in a binding must be rejected");
+
+    assert_eq!(
+        failure.to_string(),
+        "project configuration context contains unsafe display characters"
     );
 }
 

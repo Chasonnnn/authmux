@@ -119,7 +119,7 @@ authmux doctor [--context NAME] [--json]
 authmux login <context> [--provider NAME]
 authmux exec [--context NAME] -- <program> [args...]
 authmux context list [--json]
-authmux context show <name> [--json]
+authmux context show [--context NAME]
 ```
 
 Behavioral rules:
@@ -333,13 +333,15 @@ Deliverables:
 
 - [ ] Implement typed identity comparison, usability, reasons,
   reauthentication need, and evidence levels with exhaustive tests.
-- [ ] Implement user/repository config discovery, versioning, merging,
+- [x] Implement user/repository config discovery, versioning, merging,
   provenance, and validation.
-- [ ] Reject secret-shaped fields and values with redaction-safe errors.
-- [ ] Implement the secure process runner with deterministic test execution.
-- [ ] Implement `context show`, `status`, and guarded `exec` for one AWS
-  Authentication Context.
-- [ ] Add the AWS Provider Adapter from Phase 0 evidence.
+- [x] Reject secret-shaped fields and values with redaction-safe errors.
+- [x] Implement the secure process runner with deterministic test execution.
+- [x] Implement `context show` and guarded `exec` for one AWS Authentication
+  Context.
+- [ ] Implement read-only `status` using a local-metadata observation contract,
+  not the cache-refreshing execution preflight.
+- [x] Add the AWS Provider Adapter from Phase 0 evidence.
 - [ ] Add stable JSON schemas and terminal golden tests.
 
 Exit criteria:

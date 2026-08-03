@@ -1,5 +1,6 @@
 use std::env;
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::process;
@@ -10,8 +11,8 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
 use authmux::{
-    AwsAdapter, CommandSpec, ContextEngine, ExecutionFailure, ProjectBinding, SecureProcessRunner,
-    UserConfig,
+    AwsAdapter, CommandSpec, ContextDefinition, ContextEngine, ExecutionFailure, ProjectBinding,
+    SecureProcessRunner, UserConfig,
 };
 
 fn main() {
@@ -19,8 +20,9 @@ fn main() {
 }
 
 fn run() -> i32 {
-    match parse_exec(env::args_os().skip(1).collect()) {
-        Ok((selection, command)) => execute(selection, &command),
+    match parse_command(env::args_os().skip(1).collect()) {
+        Ok(CliCommand::Exec { selection, command }) => execute(selection, &command),
+        Ok(CliCommand::ContextShow { selection }) => show_context(selection),
         Err(message) => {
             eprintln!("{message}");
             2
@@ -29,35 +31,21 @@ fn run() -> i32 {
 }
 
 fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
-    let context_name = match selection {
-        ContextSelection::Explicit(context_name) => context_name,
-        ContextSelection::ProjectBound => {
-            let working_directory = match env::current_dir() {
-                Ok(directory) => directory,
-                Err(error) => {
-                    eprintln!("could not resolve working directory ({:?})", error.kind());
-                    return 2;
-                }
-            };
-            match ProjectBinding::discover(&working_directory) {
-                Ok(binding) => binding.context_name().to_owned(),
-                Err(failure) => {
-                    eprintln!("{failure}");
-                    return 2;
-                }
-            }
-        }
-    };
-    let config_text = match fs::read_to_string(user_config_path()) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("could not read user configuration ({})", error.kind());
+    let selection = match resolve_selection(selection) {
+        Ok(selection) => selection,
+        Err(message) => {
+            eprintln!("{message}");
             return 2;
         }
     };
-    let context = match UserConfig::parse(&config_text)
-        .and_then(|config| config.resolve_context(&context_name))
-    {
+    let (config, _) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let context = match config.resolve_context(&selection.context_name) {
         Ok(context) => context,
         Err(failure) => {
             eprintln!("{failure}");
@@ -95,6 +83,72 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
     }
 }
 
+fn show_context(selection: ContextSelection) -> i32 {
+    let selection = match resolve_selection(selection) {
+        Ok(selection) => selection,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let (config, definition_source) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let definition = match config.resolve_context_definition(&selection.context_name) {
+        Ok(definition) => definition,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+
+    print_context(&selection, &definition, &definition_source);
+    0
+}
+
+fn print_context(
+    selection: &ResolvedSelection,
+    definition: &ContextDefinition,
+    definition_source: &std::path::Path,
+) {
+    let context = definition.context();
+    println!("context: {}", context.name());
+    match &selection.source {
+        SelectionSource::CommandLine => println!("selection: command line"),
+        SelectionSource::ProjectBinding(source) => {
+            println!("selection: project binding");
+            println!("binding source: {}", render_path(source));
+        }
+    }
+    println!(
+        "description: {}",
+        definition.description().unwrap_or("(none)")
+    );
+    println!("definition source: {}", render_path(definition_source));
+    println!("aws profile: {}", context.provider_profile());
+    println!("expected AWS account: {}", context.expected_account());
+    println!("provider state: not observed");
+}
+
+fn render_path(path: &std::path::Path) -> String {
+    let mut rendered = String::new();
+    for character in path.to_string_lossy().chars() {
+        if character.is_control()
+            || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            write!(rendered, "\\u{{{:x}}}", u32::from(character))
+                .expect("writing to a String cannot fail");
+        } else {
+            rendered.push(character);
+        }
+    }
+    rendered
+}
+
 #[cfg(unix)]
 fn terminate_with_signal(signal_number: i32) -> i32 {
     if let Ok(signal) = Signal::try_from(signal_number) {
@@ -113,6 +167,37 @@ fn terminate_with_signal(signal_number: i32) -> i32 {
 enum ContextSelection {
     Explicit(String),
     ProjectBound,
+}
+
+enum CliCommand {
+    Exec {
+        selection: ContextSelection,
+        command: CommandSpec,
+    },
+    ContextShow {
+        selection: ContextSelection,
+    },
+}
+
+struct ResolvedSelection {
+    context_name: String,
+    source: SelectionSource,
+}
+
+enum SelectionSource {
+    CommandLine,
+    ProjectBinding(PathBuf),
+}
+
+fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
+    match arguments.first().and_then(|argument| argument.to_str()) {
+        Some("exec") => parse_exec(arguments)
+            .map(|(selection, command)| CliCommand::Exec { selection, command }),
+        Some("context") => {
+            parse_context_show(&arguments).map(|selection| CliCommand::ContextShow { selection })
+        }
+        _ => Err("usage: authmux <exec|context> ...".to_owned()),
+    }
 }
 
 fn parse_exec(arguments: Vec<OsString>) -> Result<(ContextSelection, CommandSpec), String> {
@@ -146,6 +231,55 @@ fn parse_exec(arguments: Vec<OsString>) -> Result<(ContextSelection, CommandSpec
         .map_err(|failure| failure.to_string())?;
 
     Ok((selection, command))
+}
+
+fn parse_context_show(arguments: &[OsString]) -> Result<ContextSelection, String> {
+    const USAGE: &str = "usage: authmux context show [--context <context>]";
+    if arguments.get(1).and_then(|argument| argument.to_str()) != Some("show") {
+        return Err(USAGE.to_owned());
+    }
+
+    match arguments.len() {
+        2 => Ok(ContextSelection::ProjectBound),
+        4 if arguments.get(2).and_then(|argument| argument.to_str()) == Some("--context") => {
+            let context_name = arguments
+                .get(3)
+                .and_then(|argument| argument.to_str())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "context show requires a Unicode context name".to_owned())?;
+            Ok(ContextSelection::Explicit(context_name.to_owned()))
+        }
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
+fn resolve_selection(selection: ContextSelection) -> Result<ResolvedSelection, String> {
+    match selection {
+        ContextSelection::Explicit(context_name) => Ok(ResolvedSelection {
+            context_name,
+            source: SelectionSource::CommandLine,
+        }),
+        ContextSelection::ProjectBound => {
+            let working_directory = env::current_dir().map_err(|error| {
+                format!("could not resolve working directory ({:?})", error.kind())
+            })?;
+            let binding = ProjectBinding::discover(&working_directory)
+                .map_err(|failure| failure.to_string())?;
+            Ok(ResolvedSelection {
+                context_name: binding.context_name().to_owned(),
+                source: SelectionSource::ProjectBinding(binding.source().to_path_buf()),
+            })
+        }
+    }
+}
+
+fn load_user_config() -> Result<(UserConfig, PathBuf), String> {
+    let source = user_config_path();
+    let config_text = fs::read_to_string(&source)
+        .map_err(|error| format!("could not read user configuration ({:?})", error.kind()))?;
+    let config = UserConfig::parse(&config_text).map_err(|failure| failure.to_string())?;
+    let source = fs::canonicalize(&source).unwrap_or(source);
+    Ok((config, source))
 }
 
 fn user_config_path() -> PathBuf {

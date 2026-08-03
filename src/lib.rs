@@ -7,7 +7,7 @@ mod domain;
 mod process_runner;
 
 pub use aws_adapter::AwsAdapter;
-pub use config::{ConfigFailure, ProjectBinding, UserConfig};
+pub use config::{ConfigFailure, ContextDefinition, ProjectBinding, UserConfig};
 pub use context_engine::{ContextEngine, ProcessRunner, ProviderAdapter};
 pub use domain::{
     AuthenticationContext, CommandSpec, DomainFailure, EvidenceLevel, ExecutionFailure,

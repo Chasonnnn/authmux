@@ -54,6 +54,24 @@ pub struct ProjectBinding {
     source: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextDefinition {
+    context: AuthenticationContext,
+    description: Option<String>,
+}
+
+impl ContextDefinition {
+    #[must_use]
+    pub fn context(&self) -> &AuthenticationContext {
+        &self.context
+    }
+
+    #[must_use]
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+}
+
 impl ProjectBinding {
     /// Discovers the repository root and resolves its non-secret Project Binding.
     ///
@@ -115,6 +133,11 @@ impl ProjectBinding {
                 "project configuration context cannot be empty",
             ));
         }
+        if has_unsafe_display_characters(&config.project.context) {
+            return Err(ConfigFailure::new(
+                "project configuration context contains unsafe display characters",
+            ));
+        }
 
         Ok(Self {
             context_name: config.project.context,
@@ -155,11 +178,29 @@ impl UserConfig {
         }
         if config
             .contexts
+            .keys()
+            .any(|name| has_unsafe_display_characters(name))
+        {
+            return Err(ConfigFailure::new(
+                "user configuration contains an unsafe context name",
+            ));
+        }
+        if config
+            .contexts
             .values()
             .any(|context| looks_secret_shaped(&context.providers.aws.profile))
         {
             return Err(ConfigFailure::new(
                 "user configuration contains a secret-shaped value where a provider profile was expected",
+            ));
+        }
+        if config
+            .contexts
+            .values()
+            .any(|context| has_unsafe_display_characters(&context.providers.aws.profile))
+        {
+            return Err(ConfigFailure::new(
+                "user configuration contains an unsafe provider profile",
             ));
         }
         if config.contexts.values().any(|context| {
@@ -170,6 +211,16 @@ impl UserConfig {
         }) {
             return Err(ConfigFailure::new(
                 "user configuration contains a secret-shaped value where display metadata was expected",
+            ));
+        }
+        if config.contexts.values().any(|context| {
+            context
+                .description
+                .as_deref()
+                .is_some_and(has_unsafe_display_characters)
+        }) {
+            return Err(ConfigFailure::new(
+                "user configuration contains unsafe display metadata",
             ));
         }
         Ok(config)
@@ -184,17 +235,35 @@ impl UserConfig {
         &self,
         context_name: &str,
     ) -> Result<AuthenticationContext, ConfigFailure> {
+        self.resolve_context_definition(context_name)
+            .map(|definition| definition.context)
+    }
+
+    /// Resolves one named Authentication Context and its display metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure when the context is absent or invalid.
+    pub fn resolve_context_definition(
+        &self,
+        context_name: &str,
+    ) -> Result<ContextDefinition, ConfigFailure> {
         let context = self
             .contexts
             .get(context_name)
             .ok_or_else(|| ConfigFailure::new("requested authentication context is not defined"))?;
 
-        AuthenticationContext::aws(
+        let authentication_context = AuthenticationContext::aws(
             context_name,
             &context.providers.aws.profile,
             &context.providers.aws.expected_account,
         )
-        .map_err(ConfigFailure::from)
+        .map_err(ConfigFailure::from)?;
+
+        Ok(ContextDefinition {
+            context: authentication_context,
+            description: context.description.clone(),
+        })
     }
 }
 
@@ -243,6 +312,19 @@ fn looks_secret_shaped(value: &str) -> bool {
     let jwt = value.starts_with("eyJ") && value.matches('.').count() == 2;
 
     aws_access_key || github_token || private_key || signed_url || jwt
+}
+
+fn has_unsafe_display_characters(value: &str) -> bool {
+    value.chars().count() > 512
+        || value.chars().any(|character| {
+            character.is_control()
+                || matches!(
+                    character,
+                    '\u{202a}'
+                        ..='\u{202e}' | '\u{2066}'
+                        ..='\u{2069}'
+                )
+        })
 }
 
 fn repository_root(start: &Path) -> Result<PathBuf, ConfigFailure> {

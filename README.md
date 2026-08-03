@@ -20,6 +20,13 @@ binding, omit the explicit selector:
 authmux exec -- aws s3 ls
 ```
 
+Inspect the resolved intent and provenance without invoking AWS:
+
+```console
+authmux context show
+authmux context show --context crm
+```
+
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
 mismatch, and otherwise creates a process-scoped environment for one child
@@ -62,6 +69,7 @@ Start here:
 - [ADR 0001](docs/adr/0001-delegate-credential-custody.md) — credential-custody decision
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
+- [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions
 
 ## License
 

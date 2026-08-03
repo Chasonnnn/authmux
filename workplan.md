@@ -339,7 +339,7 @@ Deliverables:
 - [x] Implement the secure process runner with deterministic test execution.
 - [x] Implement `context show` and guarded `exec` for one AWS Authentication
   Context.
-- [ ] Implement read-only `status` using a local-metadata observation contract,
+- [x] Implement read-only `status` using a local-metadata observation contract,
   not the cache-refreshing execution preflight.
 - [x] Add the AWS Provider Adapter from Phase 0 evidence.
 - [ ] Add stable JSON schemas and terminal golden tests.

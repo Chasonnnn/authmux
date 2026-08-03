@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::time::SystemTime;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthenticationContext {
@@ -111,7 +112,8 @@ pub enum EvidenceLevel {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatusObservation {
-    observed_identity: ObservedIdentity,
+    observed_at: SystemTime,
+    observed_identity: Option<ObservedIdentity>,
     identity_match: IdentityMatch,
     usability: SessionUsability,
     reason: Option<ObservationReason>,
@@ -123,7 +125,8 @@ impl StatusObservation {
     #[must_use]
     pub fn usable_provider_validation(observed_identity: ObservedIdentity) -> Self {
         Self {
-            observed_identity,
+            observed_at: SystemTime::now(),
+            observed_identity: Some(observed_identity),
             identity_match: IdentityMatch::Unverified,
             usability: SessionUsability::Usable,
             reason: None,
@@ -140,7 +143,8 @@ impl StatusObservation {
         evidence_level: EvidenceLevel,
     ) -> Self {
         Self {
-            observed_identity,
+            observed_at: SystemTime::now(),
+            observed_identity: Some(observed_identity),
             identity_match: IdentityMatch::Unverified,
             usability: SessionUsability::Unusable,
             reason: Some(reason),
@@ -157,7 +161,8 @@ impl StatusObservation {
         evidence_level: EvidenceLevel,
     ) -> Self {
         Self {
-            observed_identity,
+            observed_at: SystemTime::now(),
+            observed_identity: Some(observed_identity),
             identity_match: IdentityMatch::Unverified,
             usability: SessionUsability::Indeterminate,
             reason: Some(reason),
@@ -167,8 +172,30 @@ impl StatusObservation {
     }
 
     #[must_use]
-    pub fn observed_identity(&self) -> &ObservedIdentity {
-        &self.observed_identity
+    pub fn indeterminate_without_identity(
+        reason: ObservationReason,
+        reauthentication_need: ReauthenticationNeed,
+        evidence_level: EvidenceLevel,
+    ) -> Self {
+        Self {
+            observed_at: SystemTime::now(),
+            observed_identity: None,
+            identity_match: IdentityMatch::Unverified,
+            usability: SessionUsability::Indeterminate,
+            reason: Some(reason),
+            reauthentication_need,
+            evidence_level,
+        }
+    }
+
+    #[must_use]
+    pub fn observed_at(&self) -> SystemTime {
+        self.observed_at
+    }
+
+    #[must_use]
+    pub fn observed_identity(&self) -> Option<&ObservedIdentity> {
+        self.observed_identity.as_ref()
     }
 
     #[must_use]
@@ -197,10 +224,10 @@ impl StatusObservation {
     }
 
     pub(crate) fn compare_to(mut self, expected_account: &str) -> Self {
-        self.identity_match = if self.observed_identity.account() == expected_account {
-            IdentityMatch::Match
-        } else {
-            IdentityMatch::Mismatch
+        self.identity_match = match &self.observed_identity {
+            Some(observed) if observed.account() == expected_account => IdentityMatch::Match,
+            Some(_) => IdentityMatch::Mismatch,
+            None => IdentityMatch::Unverified,
         };
         self
     }
@@ -251,6 +278,13 @@ pub struct ExecutionSelection {
 }
 
 impl ExecutionSelection {
+    #[must_use]
+    pub fn none() -> Self {
+        Self {
+            environment: Vec::new(),
+        }
+    }
+
     #[must_use]
     pub fn aws_profile(profile: impl Into<OsString>) -> Self {
         Self {

@@ -61,7 +61,13 @@ fn supported_aws_identity_probe_becomes_a_usable_observation() {
         .observe(&context)
         .expect("fixture is a supported AWS response");
 
-    assert_eq!(observation.observed_identity().account(), "111111111111");
+    assert_eq!(
+        observation
+            .observed_identity()
+            .expect("provider validation includes identity")
+            .account(),
+        "111111111111"
+    );
     assert_eq!(observation.identity_match(), IdentityMatch::Unverified);
     assert_eq!(observation.usability(), SessionUsability::Usable);
     assert_eq!(

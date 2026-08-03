@@ -95,11 +95,11 @@ before it can be implemented honestly.
 
 ## Implementation consequence
 
-The safe next command is `context show`, which can explain user configuration,
-Project Binding, Expected Identity, and provenance without touching provider
-state. The later AWS `status` slice should use local profile metadata and report
-Session Usability as `indeterminate`; live `get-caller-identity` remains an
-`exec` preflight unless a no-write provider mechanism is proven.
+`context show` now explains user configuration, Project Binding, Expected
+Identity, and provenance without touching provider state. AWS `status` uses
+only local profile metadata and reports Session Usability as `indeterminate`;
+live `get-caller-identity` remains an `exec` preflight unless a no-write
+provider mechanism is proven. ADR 0002 records this separation.
 
 ## Primary sources
 

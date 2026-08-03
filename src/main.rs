@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::process;
+use std::time::UNIX_EPOCH;
 
 #[cfg(unix)]
 use nix::sys::signal::{Signal, kill};
@@ -11,8 +12,10 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
 use authmux::{
-    AwsAdapter, CommandSpec, ContextDefinition, ContextEngine, ExecutionFailure, ProjectBinding,
-    SecureProcessRunner, UserConfig,
+    AwsAdapter, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
+    EvidenceLevel, ExecutionFailure, IdentityMatch, ObservationReason, ProjectBinding,
+    ReauthenticationNeed, SecureProcessRunner, SessionUsability, StatusEngine, StatusObservation,
+    UserConfig,
 };
 
 fn main() {
@@ -23,6 +26,7 @@ fn run() -> i32 {
     match parse_command(env::args_os().skip(1).collect()) {
         Ok(CliCommand::Exec { selection, command }) => execute(selection, &command),
         Ok(CliCommand::ContextShow { selection }) => show_context(selection),
+        Ok(CliCommand::Status { selection }) => show_status(selection),
         Err(message) => {
             eprintln!("{message}");
             2
@@ -110,6 +114,113 @@ fn show_context(selection: ContextSelection) -> i32 {
     0
 }
 
+fn show_status(selection: ContextSelection) -> i32 {
+    let selection = match resolve_selection(selection) {
+        Ok(selection) => selection,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let (config, _) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let context = match config.resolve_context(&selection.context_name) {
+        Ok(context) => context,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let inherited = ["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
+    let runner = match SecureProcessRunner::new(&inherited) {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let engine = StatusEngine::new(AwsLocalMetadataAdapter::new(runner));
+    let observation = match engine.observe(&context) {
+        Ok(observation) => observation,
+        Err(failure) => {
+            eprintln!("provider status failed: {failure}");
+            return 5;
+        }
+    };
+
+    print_status(&context, &observation);
+    0
+}
+
+fn print_status(context: &authmux::AuthenticationContext, observation: &StatusObservation) {
+    let observed_at = observation
+        .observed_at()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    println!("context: {}", context.name());
+    println!("provider: aws");
+    println!("profile: {}", context.provider_profile());
+    println!("expected identity: {}", context.expected_account());
+    println!(
+        "observed identity: {}",
+        observation
+            .observed_identity()
+            .map_or("not observed", authmux::ObservedIdentity::account)
+    );
+    println!(
+        "identity match: {}",
+        match observation.identity_match() {
+            IdentityMatch::Match => "match",
+            IdentityMatch::Mismatch => "mismatch",
+            IdentityMatch::Unverified => "unverified",
+        }
+    );
+    println!(
+        "session usability: {}",
+        match observation.usability() {
+            SessionUsability::Usable => "usable",
+            SessionUsability::Unusable => "unusable",
+            SessionUsability::Indeterminate => "indeterminate",
+        }
+    );
+    println!(
+        "reason: {}",
+        match observation.reason() {
+            Some(ObservationReason::Expired) => "expired",
+            Some(ObservationReason::Missing) => "missing",
+            Some(ObservationReason::Unreachable) => "unreachable",
+            Some(ObservationReason::ProviderError) => "provider_error",
+            Some(ObservationReason::InsufficientEvidence) => "insufficient_evidence",
+            None => "none",
+        }
+    );
+    println!(
+        "reauthentication need: {}",
+        match observation.reauthentication_need() {
+            ReauthenticationNeed::Required => "required",
+            ReauthenticationNeed::NotRequired => "not_required",
+            ReauthenticationNeed::Unknown => "unknown",
+            ReauthenticationNeed::NotApplicable => "not_applicable",
+        }
+    );
+    println!(
+        "evidence level: {}",
+        match observation.evidence_level() {
+            EvidenceLevel::LocalMetadata => "local_metadata",
+            EvidenceLevel::ProviderValidation => "provider_validation",
+            EvidenceLevel::ConnectivityOnly => "connectivity_only",
+        }
+    );
+    println!("provider contacted: no");
+    println!("observed at unix: {observed_at}");
+}
+
 fn print_context(
     selection: &ResolvedSelection,
     definition: &ContextDefinition,
@@ -177,6 +288,9 @@ enum CliCommand {
     ContextShow {
         selection: ContextSelection,
     },
+    Status {
+        selection: ContextSelection,
+    },
 }
 
 struct ResolvedSelection {
@@ -196,7 +310,10 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
         Some("context") => {
             parse_context_show(&arguments).map(|selection| CliCommand::ContextShow { selection })
         }
-        _ => Err("usage: authmux <exec|context> ...".to_owned()),
+        Some("status") => {
+            parse_status(&arguments).map(|selection| CliCommand::Status { selection })
+        }
+        _ => Err("usage: authmux <exec|context|status> ...".to_owned()),
     }
 }
 
@@ -247,6 +364,22 @@ fn parse_context_show(arguments: &[OsString]) -> Result<ContextSelection, String
                 .and_then(|argument| argument.to_str())
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "context show requires a Unicode context name".to_owned())?;
+            Ok(ContextSelection::Explicit(context_name.to_owned()))
+        }
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
+fn parse_status(arguments: &[OsString]) -> Result<ContextSelection, String> {
+    const USAGE: &str = "usage: authmux status [--context <context>]";
+    match arguments.len() {
+        1 => Ok(ContextSelection::ProjectBound),
+        3 if arguments.get(1).and_then(|argument| argument.to_str()) == Some("--context") => {
+            let context_name = arguments
+                .get(2)
+                .and_then(|argument| argument.to_str())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "status requires a Unicode context name".to_owned())?;
             Ok(ContextSelection::Explicit(context_name.to_owned()))
         }
         _ => Err(USAGE.to_owned()),

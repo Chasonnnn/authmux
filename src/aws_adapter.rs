@@ -2,12 +2,24 @@ use std::str;
 use std::time::Duration;
 
 use crate::{
-    AuthenticationContext, CommandSpec, ExecutionSelection, ObservedIdentity, ProbePolicy,
-    ProbeRunner, ProviderAdapter, ProviderFailure, StatusObservation,
+    AuthenticationContext, CommandSpec, EvidenceLevel, ExecutionSelection, ObservationReason,
+    ObservedIdentity, ProbePolicy, ProbeRunner, ProviderAdapter, ProviderFailure,
+    ReauthenticationNeed, StatusAdapter, StatusObservation,
 };
 
 pub struct AwsAdapter<R> {
     runner: R,
+}
+
+pub struct AwsLocalMetadataAdapter<R> {
+    runner: R,
+}
+
+impl<R> AwsLocalMetadataAdapter<R> {
+    #[must_use]
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
 }
 
 impl<R> AwsAdapter<R> {
@@ -72,4 +84,59 @@ where
     ) -> Result<ExecutionSelection, ProviderFailure> {
         Ok(ExecutionSelection::aws_profile(context.provider_profile()))
     }
+}
+
+impl<R> StatusAdapter for AwsLocalMetadataAdapter<R>
+where
+    R: ProbeRunner,
+{
+    fn observe_status(
+        &self,
+        context: &AuthenticationContext,
+    ) -> Result<StatusObservation, ProviderFailure> {
+        let command = CommandSpec::new(
+            "aws",
+            [
+                "configure",
+                "get",
+                "sso_account_id",
+                "--profile",
+                context.provider_profile(),
+            ],
+        )?;
+        let output = self.runner.probe(
+            &command,
+            &ExecutionSelection::none(),
+            ProbePolicy::bounded(Duration::from_secs(2), 4_096),
+        )?;
+
+        if output.was_truncated() {
+            return Ok(indeterminate_local(ObservationReason::ProviderError));
+        }
+        if output.exit_code() != 0 {
+            return Ok(indeterminate_local(ObservationReason::InsufficientEvidence));
+        }
+
+        let Ok(account) = str::from_utf8(output.stdout()) else {
+            return Ok(indeterminate_local(ObservationReason::ProviderError));
+        };
+        let Ok(observed_identity) = ObservedIdentity::aws_account(account.trim()) else {
+            return Ok(indeterminate_local(ObservationReason::ProviderError));
+        };
+
+        Ok(StatusObservation::indeterminate(
+            observed_identity,
+            ObservationReason::InsufficientEvidence,
+            ReauthenticationNeed::Unknown,
+            EvidenceLevel::LocalMetadata,
+        ))
+    }
+}
+
+fn indeterminate_local(reason: ObservationReason) -> StatusObservation {
+    StatusObservation::indeterminate_without_identity(
+        reason,
+        ReauthenticationNeed::Unknown,
+        EvidenceLevel::LocalMetadata,
+    )
 }

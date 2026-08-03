@@ -27,14 +27,27 @@ authmux context show
 authmux context show --context crm
 ```
 
+Inspect documented local AWS profile metadata without contacting AWS or
+refreshing a Session:
+
+```console
+authmux status
+authmux status --context crm
+```
+
+This status can detect whether an IAM Identity Center profile's configured
+account matches the Expected Identity. It always reports Session Usability as
+`indeterminate`; use guarded `exec` when provider-validated identity evidence is
+required.
+
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
 mismatch, and otherwise creates a process-scoped environment for one child
 command. A repository binding may select only a user-defined context; it cannot
 override providers or commands, is never discovered above the nearest `.git`
 root, and reports its canonical source path through the Config Module. A
-matching child preserves its exit code or terminating Unix signal. `status`,
-`doctor`, `login`, and Google Cloud are still planned work. The `exec` preflight
+matching child preserves its exit code or terminating Unix signal. `doctor`,
+`login`, and Google Cloud are still planned work. The `exec` preflight
 uses normal AWS CLI credential
 resolution, which may update AWS-owned caches under its documented behavior;
 authmux does not request login or capture the resulting Credential.
@@ -68,6 +81,7 @@ Start here:
 - [CONTEXT.md](CONTEXT.md) — canonical product language
 - [AGENTS.md](AGENTS.md) — repository operating contract
 - [ADR 0001](docs/adr/0001-delegate-credential-custody.md) — credential-custody decision
+- [ADR 0002](docs/adr/0002-separate-status-from-execution-preflight.md) — read-only status boundary
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

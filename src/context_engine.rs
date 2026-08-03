@@ -38,6 +38,47 @@ pub trait ProcessRunner {
     ) -> Result<ExecutionOutcome, ExecutionFailure>;
 }
 
+pub trait StatusAdapter {
+    /// Produces a read-only Status Observation without refreshing credentials.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized provider failure when the local observation cannot
+    /// be performed safely.
+    fn observe_status(
+        &self,
+        context: &AuthenticationContext,
+    ) -> Result<StatusObservation, ProviderFailure>;
+}
+
+pub struct StatusEngine<A> {
+    adapter: A,
+}
+
+impl<A> StatusEngine<A>
+where
+    A: StatusAdapter,
+{
+    #[must_use]
+    pub fn new(adapter: A) -> Self {
+        Self { adapter }
+    }
+
+    /// Observes local provider metadata and applies core identity comparison.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized provider failure when observation cannot run.
+    pub fn observe(
+        &self,
+        context: &AuthenticationContext,
+    ) -> Result<StatusObservation, ProviderFailure> {
+        self.adapter
+            .observe_status(context)
+            .map(|observation| observation.compare_to(context.expected_account()))
+    }
+}
+
 pub struct ContextEngine<A, R> {
     provider: A,
     runner: R,
@@ -70,9 +111,15 @@ where
             .compare_to(context.expected_account());
 
         if observation.identity_match() == IdentityMatch::Mismatch {
+            let Some(observed_identity) = observation.observed_identity() else {
+                return Err(ProviderFailure::sanitized(
+                    "provider returned an inconsistent identity mismatch",
+                )
+                .into());
+            };
             return Err(ExecutionFailure::IdentityMismatch {
                 expected: context.expected_account().to_owned(),
-                observed: observation.observed_identity().account().to_owned(),
+                observed: observed_identity.account().to_owned(),
             });
         }
 

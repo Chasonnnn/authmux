@@ -117,7 +117,7 @@ or a Credential.
 authmux status [--context NAME] [--json]
 authmux doctor [--context NAME] [--json]
 authmux login <context> [--provider NAME]
-authmux exec <context> -- <program> [args...]
+authmux exec [--context NAME] -- <program> [args...]
 authmux context list [--json]
 authmux context show <name> [--json]
 ```
@@ -140,8 +140,8 @@ Behavioral rules:
 
 The final schema is a Phase 1 deliverable; this sketch defines the security
 and usability constraints, not a frozen contract. The current AWS-only tracer
-accepts the AWS subset plus optional context descriptions; Google Cloud and
-repository binding remain unimplemented.
+accepts the AWS subset, optional context descriptions, and the restricted
+repository binding; Google Cloud remains unimplemented.
 
 ```toml
 version = 1
@@ -524,9 +524,9 @@ A slice is complete only when:
 
 ## 17. Immediate next slice
 
-The fictional AWS tracer bullet now proves fail-closed mismatch behavior and a
-matching process-scoped execution path. Before expanding the command surface or
-adding Google Cloud, complete the dated Phase 0 evidence matrix and run the same
-workflow against Atmos and the `direnv` plus native-CLI control. Then close the
-remaining signal-forwarding and repository-binding acceptance criteria using
-only fictional or redacted evidence.
+The fictional AWS tracer proves fail-closed mismatch behavior, a matching
+process-scoped execution path, and root-bounded Project Binding discovery. The
+Atmos and `direnv` comparison is complete. Before expanding the command surface
+or adding Google Cloud, complete the dated Phase 0 evidence matrix and close
+the remaining signal-forwarding acceptance criteria using only fictional or
+redacted evidence.

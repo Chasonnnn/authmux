@@ -10,16 +10,41 @@ when its security model and provider behavior are ready for public scrutiny.
 ## Current tracer
 
 ```console
-authmux exec crm -- aws s3 ls
+authmux exec --context crm -- aws s3 ls
+```
+
+Inside a Git repository whose root contains a restricted `.authmux.toml`
+binding, omit the explicit selector:
+
+```console
+authmux exec -- aws s3 ls
 ```
 
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
 mismatch, and otherwise creates a process-scoped environment for one child
-command. `status`, `doctor`, `login`, repository binding, and Google Cloud are
-still planned work. The `exec` preflight uses normal AWS CLI credential
+command. A repository binding may select only a user-defined context; it cannot
+override providers or commands, is never discovered above the nearest `.git`
+root, and reports its canonical source path through the Config Module.
+`status`, `doctor`, `login`, and Google Cloud are still planned work. The
+`exec` preflight uses normal AWS CLI credential
 resolution, which may update AWS-owned caches under its documented behavior;
 authmux does not request login or capture the resulting Credential.
+
+The user configuration remains at
+`$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`. The
+optional root binding contains only:
+
+```toml
+version = 1
+
+[project]
+context = "crm"
+```
+
+`.authmux.toml` is ignored by this repository's default because project and
+organization names can be sensitive. A project that intentionally shares the
+binding must make that decision explicitly.
 
 ## Current state
 
@@ -34,6 +59,7 @@ Start here:
 - [AGENTS.md](AGENTS.md) — repository operating contract
 - [ADR 0001](docs/adr/0001-delegate-credential-custody.md) — credential-custody decision
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
+- [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 
 ## License
 

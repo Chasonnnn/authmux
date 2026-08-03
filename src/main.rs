@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::process;
 
 use authmux::{
-    AwsAdapter, CommandSpec, ContextEngine, ExecutionFailure, SecureProcessRunner, UserConfig,
+    AwsAdapter, CommandSpec, ContextEngine, ExecutionFailure, ProjectBinding, SecureProcessRunner,
+    UserConfig,
 };
 
 fn main() {
@@ -14,7 +15,7 @@ fn main() {
 
 fn run() -> i32 {
     match parse_exec(env::args_os().skip(1).collect()) {
-        Ok((context_name, command)) => execute(&context_name, &command),
+        Ok((selection, command)) => execute(selection, &command),
         Err(message) => {
             eprintln!("{message}");
             2
@@ -22,7 +23,26 @@ fn run() -> i32 {
     }
 }
 
-fn execute(context_name: &str, command: &CommandSpec) -> i32 {
+fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
+    let context_name = match selection {
+        ContextSelection::Explicit(context_name) => context_name,
+        ContextSelection::ProjectBound => {
+            let working_directory = match env::current_dir() {
+                Ok(directory) => directory,
+                Err(error) => {
+                    eprintln!("could not resolve working directory ({:?})", error.kind());
+                    return 2;
+                }
+            };
+            match ProjectBinding::discover(&working_directory) {
+                Ok(binding) => binding.context_name().to_owned(),
+                Err(failure) => {
+                    eprintln!("{failure}");
+                    return 2;
+                }
+            }
+        }
+    };
     let config_text = match fs::read_to_string(user_config_path()) {
         Ok(config) => config,
         Err(error) => {
@@ -31,7 +51,7 @@ fn execute(context_name: &str, command: &CommandSpec) -> i32 {
         }
     };
     let context = match UserConfig::parse(&config_text)
-        .and_then(|config| config.resolve_context(context_name))
+        .and_then(|config| config.resolve_context(&context_name))
     {
         Ok(context) => context,
         Err(failure) => {
@@ -66,27 +86,43 @@ fn execute(context_name: &str, command: &CommandSpec) -> i32 {
     }
 }
 
-fn parse_exec(arguments: Vec<OsString>) -> Result<(String, CommandSpec), String> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ContextSelection {
+    Explicit(String),
+    ProjectBound,
+}
+
+fn parse_exec(arguments: Vec<OsString>) -> Result<(ContextSelection, CommandSpec), String> {
+    const USAGE: &str = "usage: authmux exec [--context <context>] -- <program> [args...]";
     if arguments.first().and_then(|arg| arg.to_str()) != Some("exec") {
-        return Err("usage: authmux exec <context> -- <program> [args...]".to_owned());
+        return Err(USAGE.to_owned());
     }
-    let context = arguments
-        .get(1)
-        .and_then(|argument| argument.to_str())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "exec requires a Unicode context name".to_owned())?
-        .to_owned();
-    if arguments.get(2).and_then(|arg| arg.to_str()) != Some("--") {
+
+    let (selection, delimiter_index) = match arguments.get(1).and_then(|arg| arg.to_str()) {
+        Some("--") => (ContextSelection::ProjectBound, 1),
+        Some("--context") => {
+            let context_name = arguments
+                .get(2)
+                .and_then(|argument| argument.to_str())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "exec requires a Unicode context name".to_owned())?
+                .to_owned();
+            (ContextSelection::Explicit(context_name), 3)
+        }
+        _ => return Err(USAGE.to_owned()),
+    };
+
+    if arguments.get(delimiter_index).and_then(|arg| arg.to_str()) != Some("--") {
         return Err("exec requires `--` before the child command".to_owned());
     }
     let program = arguments
-        .get(3)
+        .get(delimiter_index + 1)
         .cloned()
         .ok_or_else(|| "exec requires a child program".to_owned())?;
-    let command = CommandSpec::new(program, arguments.into_iter().skip(4))
+    let command = CommandSpec::new(program, arguments.into_iter().skip(delimiter_index + 2))
         .map_err(|failure| failure.to_string())?;
 
-    Ok((context, command))
+    Ok((selection, command))
 }
 
 fn user_config_path() -> PathBuf {

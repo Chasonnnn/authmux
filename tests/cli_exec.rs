@@ -15,6 +15,7 @@ fn exec_refuses_a_fictional_aws_account_mismatch() {
     let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
         .args([
             "exec",
+            "--context",
             "crm",
             "--",
             "/usr/bin/touch",
@@ -42,6 +43,7 @@ fn exec_runs_a_matching_context_with_the_child_exit_code() {
     let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
         .args([
             "exec",
+            "--context",
             "crm",
             "--",
             "/bin/sh",
@@ -56,6 +58,59 @@ fn exec_runs_a_matching_context_with_the_child_exit_code() {
     let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
     assert_eq!(output.status.code(), Some(23), "stderr: {stderr}");
     assert!(stderr.is_empty());
+}
+
+#[test]
+fn exec_uses_the_repository_root_project_binding_when_context_is_omitted() {
+    let fixture = FixtureDirectory::new("project-binding");
+    let bin_directory = fixture.configure_aws("111111111111");
+    let nested_directory = fixture.configure_project_binding("crm");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--",
+            "/bin/sh",
+            "-c",
+            "test \"$AWS_PROFILE\" = 'crm-development' && exit 29",
+        ])
+        .current_dir(nested_directory)
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(29), "stderr: {stderr}");
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn exec_does_not_search_for_a_binding_above_the_repository_root() {
+    let fixture = FixtureDirectory::new("binding-boundary");
+    let bin_directory = fixture.configure_aws("111111111111");
+    let repository = fixture.path.join("repository");
+    fs::create_dir_all(repository.join(".git")).expect("repository marker is created");
+    fs::write(
+        fixture.path.join(".authmux.toml"),
+        "version = 1\n[project]\ncontext = \"crm\"\n",
+    )
+    .expect("out-of-scope parent binding is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["exec", "--", "/usr/bin/true"])
+        .current_dir(repository)
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert_eq!(
+        stderr,
+        "project binding is not configured at the repository root\n"
+    );
 }
 
 struct FixtureDirectory {
@@ -109,6 +164,18 @@ impl FixtureDirectory {
         .expect("fictional user config is written");
 
         bin_directory
+    }
+
+    fn configure_project_binding(&self, context_name: &str) -> PathBuf {
+        fs::create_dir_all(self.path.join(".git")).expect("repository marker is created");
+        fs::write(
+            self.path.join(".authmux.toml"),
+            format!("version = 1\n[project]\ncontext = \"{context_name}\"\n"),
+        )
+        .expect("fictional project binding is written");
+        let nested_directory = self.path.join("nested").join("worktree");
+        fs::create_dir_all(&nested_directory).expect("nested directory is created");
+        nested_directory
     }
 }
 

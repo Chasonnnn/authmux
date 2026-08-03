@@ -291,7 +291,7 @@ Deliverables:
 
 - [x] Inventory the installed versions and supported non-secret status/login
   commands for `aws`, `gcloud`, `gh`, and `ssh-add`.
-- [ ] Record redacted command-output fixtures for success, expiry, missing
+- [x] Record redacted command-output fixtures for success, expiry, missing
   login, missing executable, timeout, malformed output, and unreachable
   service.
 - [x] Confirm which selectors can be applied per process and which mutate

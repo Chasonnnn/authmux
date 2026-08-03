@@ -3,6 +3,32 @@ use std::time::Duration;
 use authmux::{CommandSpec, ExecutionSelection, ProbePolicy, ProbeRunner, SecureProcessRunner};
 
 #[test]
+fn missing_provider_executable_returns_a_sanitized_failure() {
+    let runner = SecureProcessRunner::new(&[]).expect("empty inheritance allowlist is valid");
+    let command = CommandSpec::new(
+        "authmux-fixture-executable-does-not-exist",
+        std::iter::empty::<&str>(),
+    )
+    .expect("fixture command is valid");
+    let selection = ExecutionSelection::aws_profile("fictional");
+
+    let failure = runner
+        .probe(
+            &command,
+            &selection,
+            ProbePolicy::bounded(Duration::from_secs(1), 1_024),
+        )
+        .expect_err("missing provider executable must fail safely");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "could not start provider probe (entity not found)"
+    );
+    assert!(!diagnostic.contains("authmux-fixture-executable"));
+}
+
+#[test]
 fn provider_probe_is_killed_at_its_deadline() {
     let runner = SecureProcessRunner::new(&[]).expect("empty inheritance allowlist is valid");
     let command = CommandSpec::new("/bin/sleep", ["2"]).expect("fixture command is valid");

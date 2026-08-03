@@ -166,7 +166,7 @@ impl FixtureDirectory {
             &aws,
             format!(
                 "#!/bin/sh\n\
-                 if [ \"$1 $2 $3 $4 $5 $6 $7\" = \"sts get-caller-identity --query Account --output text --no-cli-pager\" ]; then\n\
+                 if [ \"$1 $2 $3 $4 $5 $6 $7 $8\" = \"sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt\" ]; then\n\
                    printf '{observed_account}\\n'\n\
                    exit 0\n\
                  fi\n\

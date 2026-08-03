@@ -35,6 +35,7 @@ where
                 "--output",
                 "text",
                 "--no-cli-pager",
+                "--no-cli-auto-prompt",
             ],
         )?;
         let selection = ExecutionSelection::aws_profile(context.provider_profile());

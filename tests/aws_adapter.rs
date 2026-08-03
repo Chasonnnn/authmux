@@ -5,7 +5,11 @@ use authmux::{
     ProbeOutput, ProbePolicy, ProbeRunner, ProviderAdapter, ProviderFailure, SessionUsability,
 };
 
-struct AwsIdentityFixture;
+struct AwsIdentityFixture {
+    exit_code: i32,
+    stdout: &'static [u8],
+    stderr: &'static [u8],
+}
 
 impl ProbeRunner for AwsIdentityFixture {
     fn probe(
@@ -25,6 +29,7 @@ impl ProbeRunner for AwsIdentityFixture {
                 "--output",
                 "text",
                 "--no-cli-pager",
+                "--no-cli-auto-prompt",
             ]
         );
         assert_eq!(
@@ -34,30 +39,21 @@ impl ProbeRunner for AwsIdentityFixture {
         assert_eq!(policy.timeout(), Duration::from_secs(5));
         assert_eq!(policy.output_limit(), 4_096);
 
-        Ok(ProbeOutput::exited(0, b"111111111111\n", b""))
-    }
-}
-
-struct SensitiveFailureFixture;
-
-impl ProbeRunner for SensitiveFailureFixture {
-    fn probe(
-        &self,
-        _command: &authmux::CommandSpec,
-        _selection: &ExecutionSelection,
-        _policy: ProbePolicy,
-    ) -> Result<ProbeOutput, ProviderFailure> {
         Ok(ProbeOutput::exited(
-            1,
-            b"",
-            b"provider rejected AKIA1111111111111111",
+            self.exit_code,
+            self.stdout,
+            self.stderr,
         ))
     }
 }
 
 #[test]
 fn supported_aws_identity_probe_becomes_a_usable_observation() {
-    let adapter = AwsAdapter::new(AwsIdentityFixture);
+    let adapter = AwsAdapter::new(AwsIdentityFixture {
+        exit_code: 0,
+        stdout: include_bytes!("fixtures/aws/success.stdout"),
+        stderr: b"",
+    });
     let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
         .expect("fictional context is valid");
 
@@ -77,7 +73,11 @@ fn supported_aws_identity_probe_becomes_a_usable_observation() {
 
 #[test]
 fn provider_failure_does_not_expose_native_output() {
-    let adapter = AwsAdapter::new(SensitiveFailureFixture);
+    let adapter = AwsAdapter::new(AwsIdentityFixture {
+        exit_code: 1,
+        stdout: b"",
+        stderr: include_bytes!("fixtures/aws/sensitive.stderr"),
+    });
     let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
         .expect("fictional context is valid");
 
@@ -91,4 +91,62 @@ fn provider_failure_does_not_expose_native_output() {
         "AWS identity observation failed; run `authmux login` for this context"
     );
     assert!(!diagnostic.contains("AKIA1111111111111111"));
+    assert!(!diagnostic.contains("/fictional/private/path"));
+}
+
+#[test]
+fn recorded_nonzero_status_fixtures_remain_sanitized_execution_failures() {
+    let fixtures = [
+        (
+            "expired fixture must fail closed",
+            include_bytes!("fixtures/aws/expired.stderr").as_slice(),
+        ),
+        (
+            "missing-login fixture must fail closed",
+            include_bytes!("fixtures/aws/missing-login.stderr").as_slice(),
+        ),
+        (
+            "unreachable fixture must fail closed",
+            include_bytes!("fixtures/aws/unreachable.stderr").as_slice(),
+        ),
+    ];
+    let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
+        .expect("fictional context is valid");
+
+    for (expectation, stderr) in fixtures {
+        let adapter = AwsAdapter::new(AwsIdentityFixture {
+            exit_code: 1,
+            stdout: b"",
+            stderr,
+        });
+        let failure = adapter.observe(&context).expect_err(expectation);
+
+        assert_eq!(
+            failure.to_string(),
+            "AWS identity observation failed; run `authmux login` for this context"
+        );
+    }
+}
+
+#[test]
+fn malformed_success_fixture_is_rejected_without_echoing_output() {
+    let malformed = include_bytes!("fixtures/aws/malformed.stdout");
+    let adapter = AwsAdapter::new(AwsIdentityFixture {
+        exit_code: 0,
+        stdout: malformed,
+        stderr: b"",
+    });
+    let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
+        .expect("fictional context is valid");
+
+    let failure = adapter
+        .observe(&context)
+        .expect_err("malformed provider output must fail closed");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "AWS account identity must contain exactly 12 digits"
+    );
+    assert!(!diagnostic.contains("unexpected-extra-field"));
 }

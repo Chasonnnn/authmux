@@ -73,12 +73,13 @@ Every supported Adapter contract needs fictional, redacted fixtures for:
 | unreachable service | known connectivity category | indeterminate, `unreachable`; preserve other providers' observations |
 | sensitive stderr | token-like and path-like seeded bytes | no seeded value reaches errors, reports, snapshots, or logs |
 
-The current AWS `exec` Adapter has deterministic success, provider-failure,
-timeout, output-cap, and malformed-output coverage across its Adapter and
-runner layers. It still collapses expired, missing-login, and unreachable
-provider output into one sanitized execution failure. A read-only `status`
-command therefore requires a separate local-metadata observation contract and
-an optional Observed Identity before it can be implemented honestly.
+The current AWS `exec` Adapter has checked-in fictional fixtures for success,
+expired, missing-login, unreachable, malformed, and sensitive output, plus
+runner coverage for a missing executable, timeout, and output caps. It still
+collapses expired, missing-login, and unreachable provider output into one
+sanitized execution failure. A read-only `status` command therefore requires a
+separate local-metadata observation contract and an optional Observed Identity
+before it can be implemented honestly.
 
 ## Prohibited commands and interpretations
 

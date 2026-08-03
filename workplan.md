@@ -332,7 +332,7 @@ Exit criteria:
 
 Deliverables:
 
-- [ ] Implement typed identity comparison, usability, reasons,
+- [x] Implement typed identity comparison, usability, reasons,
   reauthentication need, and evidence levels with exhaustive tests.
 - [x] Implement user/repository config discovery, versioning, merging,
   provenance, and validation.

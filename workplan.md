@@ -311,7 +311,7 @@ Deliverables:
 - [x] Limit SSH evidence to local readiness in 0.1; do not infer remote
   identity, MFA state, authorization, or expiry from agent inspection.
 - [ ] Validate the proposed status states against real provider evidence.
-- [ ] Create the Rust crate, CI, formatting, linting, and test harness under the
+- [x] Create the Rust crate, CI, formatting, linting, and test harness under the
   pinned toolchain.
 
 Exit criteria:

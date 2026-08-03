@@ -59,7 +59,8 @@ binding must make that decision explicitly.
 The crate now contains the first test-driven AWS identity guard, bounded
 provider probe runner, strict user and project config parsers, and isolated
 child runner with exit/signal parity. It remains a development tracer rather
-than a released CLI.
+than a released CLI. CI runs the same format, strict lint, test, and locked
+build gates on pinned Ubuntu and macOS runners.
 
 Start here:
 

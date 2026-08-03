@@ -17,13 +17,27 @@ account, GitHub user, or SSH key label.
 _Avoid_: Account when the provider-specific meaning is unclear
 
 **Provider Profile**:
-A native, non-secret selector for a Provider Identity, such as an AWS profile
-or Google Cloud configuration name.
+A native, non-secret selector intended to resolve to a Provider Identity, such
+as an AWS profile or Google Cloud configuration name.
 _Avoid_: Credential profile, secret profile
 
+**Expected Identity**:
+The Provider Identity a developer declares as appropriate for an
+Authentication Context.
+_Avoid_: Configured account, assumed identity
+
+**Observed Identity**:
+The Provider Identity reported by a read-only Status Observation.
+_Avoid_: Current account, actual identity
+
+**Identity Match**:
+The comparison between an Expected Identity and an Observed Identity:
+`match`, `mismatch`, or `unverified`.
+_Avoid_: Valid identity, trusted identity
+
 **Authentication Context**:
-A named set of Provider Profiles intended to be used together for one body of
-work.
+A named set of Provider Profiles and Expected Identities intended to be used
+together for one body of work.
 _Avoid_: Workspace, environment, account bundle
 
 **Project Binding**:
@@ -50,10 +64,25 @@ A read-only, time-bounded check of what a provider safely reports about a
 Session.
 _Avoid_: Validation when the check cannot prove end-to-end authorization
 
-**Validity State**:
-The normalized conclusion from a Status Observation: `valid`, `expired`,
-`refreshable`, `unknown`, `unreachable`, or `not_applicable`.
-_Avoid_: Healthy, broken
+**Session Usability**:
+Whether provider evidence supports using a Session now: `usable`, `unusable`,
+or `indeterminate`.
+_Avoid_: Validity state, healthy, broken
+
+**Observation Reason**:
+The normalized explanation for a Session Usability conclusion, such as
+`expired`, `missing`, `unreachable`, or `provider_error`.
+_Avoid_: Status, failure state
+
+**Reauthentication Need**:
+Whether a Session requires explicit Reauthentication: `required`,
+`not_required`, `unknown`, or `not_applicable`.
+_Avoid_: Refreshable, login state
+
+**Evidence Level**:
+The strength of a Status Observation: `local_metadata`,
+`provider_validation`, or `connectivity_only`.
+_Avoid_: Confidence score, proof
 
 **Reauthentication**:
 An explicit user-initiated native provider flow that establishes or refreshes

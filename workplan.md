@@ -3,11 +3,11 @@
 ## 1. Outcome
 
 Build a local-first, open-source CLI that lets one developer answer three
-questions reliably across AWS, Google Cloud, GitHub, SSH, and later providers:
+questions reliably across AWS, Google Cloud, and later providers:
 
-1. Which identity will this project use?
-2. Is the corresponding native session usable, expired, refreshable, unknown,
-   or unreachable?
+1. Does the observed identity match the identity this project expects?
+2. Is the corresponding native session usable, and what evidence supports that
+   conclusion?
 3. How can I reauthenticate or run one command in the intended context without
    contaminating another project?
 
@@ -56,12 +56,13 @@ machine and already uses the providers' supported CLIs.
   `context show`.
 - Normalized status model with observation time and evidence level.
 - Initial Provider Adapters:
-  - AWS via supported `aws` profile/session commands; optional integration with
-    one external session tool only after a discovery spike.
-  - Google Cloud via named `gcloud` configurations.
-  - GitHub via `gh` hosts/accounts, with an explicit concurrency decision for
-    its global active-account behavior.
-  - SSH via agent/key availability and optional connectivity probes.
+  - AWS via supported `aws` profile/session commands.
+  - Google Cloud after the AWS vertical slice proves the Interface, with gcloud
+    CLI configuration and Application Default Credentials treated as separate
+    credential planes and observed independently.
+- Evidence-only feasibility notes for GitHub and SSH; neither enters 0.1 unless
+  Phase 0 demonstrates safe process-scoped identity selection without copying
+  credentials or mutating global provider state.
 - Human-readable terminal output and stable JSON output.
 - Secret-shaped config rejection and end-to-end redaction tests.
 
@@ -74,6 +75,12 @@ machine and already uses the providers' supported CLIs.
 - Background refresh, a daemon, cloud synchronization, team RBAC, approval
   workflows, a GUI, or a hosted control plane.
 - SSH certificate issuance or a general-purpose SSH connection manager.
+- GitHub or SSH execution selection without a provider-supported,
+  process-scoped mechanism.
+- `shell`, generic logout or revocation, automatic identity discovery, external
+  Provider Adapter plugins, or arbitrary environment-selector maps.
+- Generated `GIT_SSH_COMMAND`, first-class `KUBECONFIG`, or any command that
+  prints or exports a Credential for authmux to relay.
 - Automatic discovery of every account on the machine.
 - Mutating a provider's global active identity during `exec` unless the user
   explicitly opts into a documented, serialized fallback.
@@ -85,20 +92,24 @@ The terms in `CONTEXT.md` are normative. The initial model is:
 ```text
 Project Binding
     -> Authentication Context
-         -> one or more Provider Profiles
+         -> one or more Provider Profiles + Expected Identities
               -> Provider-owned Session
                    -> Status Observation
-                        -> Validity State
+                        -> Observed Identity + Identity Match
+                        -> Session Usability + Observation Reason
+                        -> Reauthentication Need + Evidence Level
 
 Authentication Context
     -> Execution Scope
          -> child command
 ```
 
-A context contains references and display metadata only. A Status Observation
-records `provider`, `profile`, `observed_at`, `state`, `evidence_level`, an
-optional provider-reported expiration, and a sanitized next action. It never
-contains raw provider output or a Credential.
+A context contains references, Expected Identities, and display metadata only.
+A Status Observation records `provider`, `profile`, `observed_at`,
+`observed_identity`, `identity_match`, `usability`, `reason`,
+`reauthentication_need`, `evidence_level`, an optional provider-reported
+expiration, and a sanitized next action. It never contains raw provider output
+or a Credential.
 
 ## 6. Proposed command contract
 
@@ -128,7 +139,9 @@ Behavioral rules:
 ## 7. Configuration sketch
 
 The final schema is a Phase 1 deliverable; this sketch defines the security
-and usability constraints, not a frozen contract.
+and usability constraints, not a frozen contract. The current AWS-only tracer
+accepts the AWS subset plus optional context descriptions; Google Cloud and
+repository binding remain unimplemented.
 
 ```toml
 version = 1
@@ -138,13 +151,19 @@ description = "CRM project"
 
 [contexts.crm.providers.aws]
 profile = "crm-development"
+expected_account = "123456789012"
 
 [contexts.crm.providers.gcp]
 configuration = "crm"
+expected_identity = "developer@example.invalid"
+credential_planes = ["cli"]
 
-[contexts.crm.providers.github]
-host = "github.com"
-identity = "work-handle"
+```
+
+Repository configuration contains only the binding:
+
+```toml
+version = 1
 
 [project]
 context = "crm"
@@ -153,8 +172,8 @@ context = "crm"
 Configuration layers, from lowest to highest precedence:
 
 1. User config defines reusable Authentication Contexts.
-2. Repository config binds the project to a context and may narrow non-secret
-   selectors.
+2. Repository config may only bind the project to a user-defined context; it
+   cannot define or override Provider Profiles or Expected Identities.
 3. Explicit CLI flags select a context for one invocation.
 
 The loader must report the source of every resolved field, reject unknown or
@@ -177,7 +196,6 @@ discovery, supported command variants, narrow parsing, native login arguments,
 and process-scoped selectors. The Interface should remain small:
 
 ```text
-capabilities() -> ProviderCapabilities
 observe(profile, probe_policy) -> StatusObservation
 login_plan(profile) -> InteractiveCommand
 execution_selection(profile) -> ExecutionSelection
@@ -212,23 +230,26 @@ in command handlers.
 
 ## 9. Status semantics
 
-Each Provider Adapter maps native evidence to exactly one state:
+Each Status Observation reports orthogonal conclusions instead of forcing
+provider evidence into one overloaded state:
 
-| State | Meaning | Typical next action |
+| Axis | Values | Meaning |
 |---|---|---|
-| `valid` | Provider evidence supports current usability | None |
-| `expired` | Provider explicitly reports an expired session | Run `login` |
-| `refreshable` | Native tooling reports it can refresh under its own rules | Run explicit refresh/login |
-| `unknown` | Available evidence cannot determine validity | Run a provider-specific probe |
-| `unreachable` | A bounded probe could not reach required local/remote state | Fix connectivity or CLI setup |
-| `not_applicable` | The identity does not have an expiring session | Check availability/connectivity only |
+| Session Usability | `usable`, `unusable`, `indeterminate` | Whether current use is supported by evidence |
+| Identity Match | `match`, `mismatch`, `unverified` | Whether observed and expected identities agree |
+| Reauthentication Need | `required`, `not_required`, `unknown`, `not_applicable` | Whether an explicit native flow is needed |
+| Observation Reason | provider-neutral typed reason or none | Why the conclusion was reached |
 
-Every observation also declares an evidence level:
+Every observation also declares one evidence level:
 
 - `local_metadata`: no remote authorization was exercised.
 - `provider_validation`: a supported read-only provider command succeeded.
 - `connectivity_only`: presence or connection was observed without identity
   authorization proof.
+
+Expiration is optional and may be reported only when a supported native command
+exposes it without printing a Credential. None of the initial Adapter evidence
+currently justifies promising an exact countdown.
 
 ## 10. Security design and threat checklist
 
@@ -252,7 +273,8 @@ Every observation also declares an evidence level:
 ### Required controls
 
 - Argument-vector process execution and executable allowlisting/discovery.
-- Minimal environment construction with an explicit inheritance policy.
+- Minimal environment construction with a user-owned inheritance allowlist;
+  repository configuration cannot add inherited variable names.
 - Output caps, timeouts, control-character handling, and redaction.
 - Config trust messaging and an inspectable resolution report.
 - No executable paths or arbitrary commands from repository config.
@@ -274,9 +296,20 @@ Deliverables:
   service.
 - [ ] Confirm which selectors can be applied per process and which mutate
   global state.
-- [ ] Compare AWS native profiles, IAM Identity Center, Granted, and aws-vault;
-  select only one optional external-tool path for 0.1.
-- [ ] Resolve the GitHub multi-account concurrency strategy.
+- [ ] Prove native AWS profiles and modern IAM Identity Center behavior,
+  including concurrent profiles that share one SSO session; add no first-class
+  external AWS session-tool integration in 0.1.
+- [ ] Compare the fictional AWS mismatch workflow against Atmos and against a
+  `direnv` plus native-CLI control, using Granted for AWS where it is already
+  configured; record versioned build-vs-adopt evidence.
+- [ ] Test the GitHub hypothesis of pre-provisioned, user-owned
+  `GH_CONFIG_DIR` directories, secure credential-store failure, and Git helper
+  behavior without switching a shared active account or extracting a token.
+- [ ] Treat gcloud CLI authentication and ADC as separate evidence surfaces;
+  test selectors across representative client libraries without reading or
+  printing credentials.
+- [ ] Limit SSH evidence to local readiness in 0.1; do not infer remote
+  identity, MFA state, authorization, or expiry from agent inspection.
 - [ ] Validate the proposed status states against real provider evidence.
 - [ ] Create the Rust crate, CI, formatting, linting, and test harness under the
   pinned toolchain.
@@ -286,42 +319,50 @@ Exit criteria:
 - Every initial provider has an evidence matrix with commands, side effects,
   output sensitivity, timeouts, and known uncertainty.
 - No required 0.1 workflow depends on reading raw credential caches.
+- The evidence matrix rejects credential-export and token-printing commands,
+  generated `GIT_SSH_COMMAND`, and unverified exact-expiry claims.
+- The Atmos and `direnv` control runs establish whether authmux's identity guard
+  adds value beyond existing tooling.
 - Hard architectural decisions are accepted as ADRs.
 - The empty crate passes format, clippy, test, and locked build checks on macOS
   and Linux.
 
-### Phase 1 — configuration, domain, and read-only status
+### Phase 1 — AWS identity-guard vertical slice
 
 Deliverables:
 
-- [ ] Implement typed domain states and evidence levels with exhaustive tests.
+- [ ] Implement typed identity comparison, usability, reasons,
+  reauthentication need, and evidence levels with exhaustive tests.
 - [ ] Implement user/repository config discovery, versioning, merging,
   provenance, and validation.
 - [ ] Reject secret-shaped fields and values with redaction-safe errors.
 - [ ] Implement the secure process runner with deterministic test execution.
-- [ ] Implement `context list`, `context show`, `status`, and `doctor`.
-- [ ] Add AWS and Google Cloud Provider Adapters from Phase 0 evidence.
+- [ ] Implement `context show`, `status`, and guarded `exec` for one AWS
+  Authentication Context.
+- [ ] Add the AWS Provider Adapter from Phase 0 evidence.
 - [ ] Add stable JSON schemas and terminal golden tests.
 
 Exit criteria:
 
 - A repository resolves to the intended context with explainable provenance.
-- Status across AWS and Google Cloud reports partial failures without hiding
-  successful observations.
+- A mismatched observed AWS account prevents child execution with a sanitized,
+  actionable failure.
+- A matching AWS account runs the child with process-scoped selection and exact
+  exit-code and signal behavior.
 - Running read-only commands cannot change native provider state.
 - Token-like test data never appears in snapshots, errors, or JSON.
 - Default tests run without real accounts or credential caches.
 
-### Phase 2 — isolated execution
+### Phase 2 — Google Cloud and multi-provider isolation
 
 Deliverables:
 
-- [ ] Implement `exec` with child-only selectors, signal forwarding, and exact
-  exit-code propagation.
+- [ ] Generalize `exec` from the proven AWS slice to multiple Provider Profiles.
 - [ ] Define and test the environment inheritance allowlist.
 - [ ] Re-resolve the context immediately before process spawn.
-- [ ] Add GitHub and SSH Provider Adapters with their documented evidence
-  limitations.
+- [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
+  observations for every declared credential plane.
+- [ ] Keep GitHub and SSH evidence-only unless Phase 0 proves safe selection.
 - [ ] Refuse unsafe global switching by default.
 - [ ] Add cross-context concurrency tests and hostile argument tests.
 
@@ -329,6 +370,8 @@ Exit criteria:
 
 - Two simultaneous commands can target different safe contexts without
   contaminating each other.
+- A successful gcloud CLI observation never implies that SDK ADC is usable or
+  resolves to the same identity.
 - The child sees only the intended selectors and allowed inherited variables.
 - Spaces, Unicode, leading dashes, and shell metacharacters remain literal
   arguments.
@@ -420,9 +463,11 @@ is hard to reverse, surprising, and a real trade-off.
 
 - CLI framework and async runtime, if any.
 - Exact user and project config locations and precedence.
-- GitHub multi-account strategy when `gh` requires global active state.
-- AWS external-session-tool support: none, Granted, or aws-vault.
-- Whether SSH remote probes belong in 0.1 or agent inspection is sufficient.
+- Whether pre-provisioned `GH_CONFIG_DIR` directories remain safely isolated
+  when the OS credential store is unavailable and when Git uses `gh` as a
+  credential helper.
+- Whether a user-owned ADC reference has portable, process-scoped behavior
+  across the supported Google client libraries.
 - JSON schema versioning and exit-code taxonomy.
 - Distribution channels beyond release binaries.
 
@@ -434,13 +479,13 @@ least two of these outcomes:
 - It prevents or catches a real wrong-account or wrong-project action.
 - It removes repeated manual status/login steps on most active workdays.
 - Project onboarding becomes materially simpler than provider-specific notes.
-- The same core model works for at least three providers without provider
+- The same core model works for at least two providers without provider
   details leaking through the Interface.
 
 Pause or narrow the project if:
 
-- Native tooling plus shell aliases solves the observed workflow with similar
-  reliability.
+- Atmos or `direnv` plus native tooling solves the observed workflow with
+  similar reliability and acceptable custody/trust behavior.
 - Status remains mostly `unknown`, making the dashboard misleading.
 - Safe execution requires routine global provider mutation.
 - Maintenance tracks provider CLI churn more than user value.
@@ -456,11 +501,13 @@ cycle, not a hosted product or team platform.
 |---|---|---|---|
 | Provider output changes | False status or parser failure | narrow parsers, version matrix, fixtures, explicit `unknown` | upstream CLI release breaks contract tests |
 | Global identity mutation | Cross-project contamination | process selectors; reject or serialize fallback | provider lacks safe selector |
+| Duplicate existing product | Low incremental user value | benchmark the same workflow against Atmos and a native-tool control | identity guard is not materially safer or simpler |
 | Secret leakage | Credential compromise | central runner/redactor, hostile fixtures, no raw cache reads | any sensitive value reaches output |
 | Misleading validity | Unsafe operator confidence | evidence levels, timestamps, honest uncertainty | local and remote evidence diverge |
 | Config from untrusted repo | Wrong identity or command | no commands/paths in project config, inspectable resolution | config influences executable selection |
 | Scope expansion | Poor return on maintenance | non-goals and dogfood economics gate | daemon, GUI, or team request before 0.1 proof |
 | Provider maintenance burden | Unsustainable project | small Adapter Interface, documented support matrix | repeated breakage across releases |
+| Credential-plane confusion | Wrong GCP identity in SDKs | observe gcloud CLI and ADC independently | a child uses an undeclared or unverified plane |
 
 ## 16. Definition of done for each slice
 
@@ -477,8 +524,9 @@ A slice is complete only when:
 
 ## 17. Immediate next slice
 
-Begin Phase 0 with a read-only evidence collector document—not product code—for
-the four initial providers. For each command, record supported CLI version,
-arguments, side effects, exit codes, stdout/stderr sensitivity, timeout,
-evidence level, and whether selection is process-scoped. Use only fictional or
-redacted results in the repository.
+The fictional AWS tracer bullet now proves fail-closed mismatch behavior and a
+matching process-scoped execution path. Before expanding the command surface or
+adding Google Cloud, complete the dated Phase 0 evidence matrix and run the same
+workflow against Atmos and the `direnv` plus native-CLI control. Then close the
+remaining signal-forwarding and repository-binding acceptance criteria using
+only fictional or redacted evidence.

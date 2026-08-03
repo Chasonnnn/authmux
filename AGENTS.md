@@ -87,7 +87,9 @@ environment filtering, output limits, and redaction are enforced consistently.
 - Status probes are read-only, bounded by a timeout, and capped in output size.
 - Provider stdout and stderr are untrusted inputs. Parse narrowly, redact
   before diagnostics, and return typed failures.
-- Unknown, unreachable, expired, and not-applicable states remain distinct.
+- Session Usability, Observation Reason, Reauthentication Need, Identity Match,
+  and Evidence Level remain distinct; adapters do not collapse them into one
+  overloaded status.
 - Never infer an expiration time. Preserve provider-reported provenance and
   observation time.
 - Login is explicit, interactive when the provider requires it, and uses the

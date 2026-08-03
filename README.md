@@ -23,6 +23,8 @@ authmux exec -- aws s3 ls
 Inspect the resolved intent and provenance without invoking AWS:
 
 ```console
+authmux context list
+authmux context list --json
 authmux context show
 authmux context show --context crm
 ```

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "command": "context_list",
+  "contexts": [
+    {
+      "name": "analytics",
+      "description": null,
+      "providers": [
+        {
+          "provider": "aws",
+          "profile": "analytics-readonly",
+          "expected_identity": "222222222222"
+        }
+      ]
+    },
+    {
+      "name": "crm",
+      "description": "Fictional CRM project",
+      "providers": [
+        {
+          "provider": "aws",
+          "profile": "crm-development",
+          "expected_identity": "111111111111"
+        }
+      ]
+    }
+  ]
+}

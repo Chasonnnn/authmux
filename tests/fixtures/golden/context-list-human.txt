@@ -1,0 +1,11 @@
+contexts: 2
+- analytics
+  description: (none)
+  aws profile: analytics-readonly
+  expected AWS account: 222222222222
+  provider state: not observed
+- crm
+  description: Fictional CRM project
+  aws profile: crm-development
+  expected AWS account: 111111111111
+  provider state: not observed

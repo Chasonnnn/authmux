@@ -5,15 +5,41 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 
 use crate::{
-    AuthenticationContext, EvidenceLevel, IdentityMatch, ObservationReason, ReauthenticationNeed,
-    SessionUsability, StatusObservation,
+    AuthenticationContext, ContextDefinition, EvidenceLevel, IdentityMatch, ObservationReason,
+    ReauthenticationNeed, SessionUsability, StatusObservation,
 };
 
 const STATUS_SCHEMA_VERSION: u32 = 1;
+const CONTEXT_LIST_SCHEMA_VERSION: u32 = 1;
 
 pub struct StatusReport {
     context: String,
     observation: StatusEntry,
+}
+
+pub struct ContextListReport {
+    contexts: Vec<ContextListEntry>,
+}
+
+#[derive(Serialize)]
+struct ContextListDocument<'a> {
+    schema_version: u32,
+    command: &'static str,
+    contexts: &'a [ContextListEntry],
+}
+
+#[derive(Serialize)]
+struct ContextListEntry {
+    name: String,
+    description: Option<String>,
+    providers: [ProviderReference; 1],
+}
+
+#[derive(Serialize)]
+struct ProviderReference {
+    provider: &'static str,
+    profile: String,
+    expected_identity: String,
 }
 
 #[derive(Serialize)]
@@ -134,6 +160,74 @@ impl StatusReport {
         };
         let mut json = serde_json::to_string_pretty(&document)
             .map_err(|_| PresentationFailure::new("could not serialize status report"))?;
+        json.push('\n');
+        Ok(json)
+    }
+}
+
+impl ContextListReport {
+    #[must_use]
+    pub fn new(definitions: &[ContextDefinition]) -> Self {
+        let contexts = definitions
+            .iter()
+            .map(|definition| {
+                let context = definition.context();
+                ContextListEntry {
+                    name: context.name().to_owned(),
+                    description: definition.description().map(str::to_owned),
+                    providers: [ProviderReference {
+                        provider: "aws",
+                        profile: context.provider_profile().to_owned(),
+                        expected_identity: context.expected_account().to_owned(),
+                    }],
+                }
+            })
+            .collect();
+        Self { contexts }
+    }
+
+    #[must_use]
+    pub fn render_human(&self) -> String {
+        let mut report = String::new();
+        writeln!(report, "contexts: {}", self.contexts.len())
+            .expect("writing to a String cannot fail");
+        for context in &self.contexts {
+            let provider = &context.providers[0];
+            writeln!(report, "- {}", context.name).expect("writing to a String cannot fail");
+            writeln!(
+                report,
+                "  description: {}",
+                context.description.as_deref().unwrap_or("(none)")
+            )
+            .expect("writing to a String cannot fail");
+            writeln!(report, "  aws profile: {}", provider.profile)
+                .expect("writing to a String cannot fail");
+            writeln!(
+                report,
+                "  expected AWS account: {}",
+                provider.expected_identity
+            )
+            .expect("writing to a String cannot fail");
+            writeln!(report, "  provider state: not observed")
+                .expect("writing to a String cannot fail");
+        }
+        report
+    }
+
+    /// Serializes the stable context-list schema without observing providers.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the fixed report structure cannot be
+    /// serialized.
+    pub fn render_json(&self) -> Result<String, PresentationFailure> {
+        let document = ContextListDocument {
+            schema_version: CONTEXT_LIST_SCHEMA_VERSION,
+            command: "context_list",
+            contexts: &self.contexts,
+        };
+        let mut json = serde_json::to_string_pretty(&document)
+            .map_err(|_| PresentationFailure::new("could not serialize context list"))?;
         json.push('\n');
         Ok(json)
     }

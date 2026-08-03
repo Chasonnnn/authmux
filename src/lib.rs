@@ -17,6 +17,6 @@ pub use domain::{
     ExecutionOutcome, ExecutionSelection, IdentityMatch, ObservationReason, ObservedIdentity,
     ProviderFailure, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
-pub use presentation::{PresentationFailure, StatusReport};
+pub use presentation::{ContextListReport, PresentationFailure, StatusReport};
 pub use process_runner::SecureProcessRunner;
 pub use process_runner::{ProbeOutput, ProbePolicy, ProbeRunner};

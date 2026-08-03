@@ -239,6 +239,18 @@ impl UserConfig {
             .map(|definition| definition.context)
     }
 
+    /// Resolves every configured Authentication Context in stable name order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure when any configured context is invalid.
+    pub fn context_definitions(&self) -> Result<Vec<ContextDefinition>, ConfigFailure> {
+        self.contexts
+            .keys()
+            .map(|name| self.resolve_context_definition(name))
+            .collect()
+    }
+
     /// Resolves one named Authentication Context and its display metadata.
     ///
     /// # Errors

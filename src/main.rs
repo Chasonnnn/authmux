@@ -12,7 +12,8 @@ use nix::unistd::Pid;
 
 use authmux::{
     AwsAdapter, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
-    ExecutionFailure, ProjectBinding, SecureProcessRunner, StatusEngine, StatusReport, UserConfig,
+    ContextListReport, ExecutionFailure, ProjectBinding, SecureProcessRunner, StatusEngine,
+    StatusReport, UserConfig,
 };
 
 fn main() {
@@ -23,6 +24,7 @@ fn run() -> i32 {
     match parse_command(env::args_os().skip(1).collect()) {
         Ok(CliCommand::Exec { selection, command }) => execute(selection, &command),
         Ok(CliCommand::ContextShow { selection }) => show_context(selection),
+        Ok(CliCommand::ContextList { format }) => show_context_list(format),
         Ok(CliCommand::Status { selection, format }) => show_status(selection, format),
         Err(message) => {
             eprintln!("{message}");
@@ -108,6 +110,36 @@ fn show_context(selection: ContextSelection) -> i32 {
     };
 
     print_context(&selection, &definition, &definition_source);
+    0
+}
+
+fn show_context_list(format: ReportFormat) -> i32 {
+    let (config, _) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let definitions = match config.context_definitions() {
+        Ok(definitions) => definitions,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let report = ContextListReport::new(&definitions);
+    let rendered = match format {
+        ReportFormat::Human => report.render_human(),
+        ReportFormat::Json => match report.render_json() {
+            Ok(json) => json,
+            Err(failure) => {
+                eprintln!("could not render context list: {failure}");
+                return 5;
+            }
+        },
+    };
+    print!("{rendered}");
     0
 }
 
@@ -238,6 +270,9 @@ enum CliCommand {
     ContextShow {
         selection: ContextSelection,
     },
+    ContextList {
+        format: ReportFormat,
+    },
     Status {
         selection: ContextSelection,
         format: ReportFormat,
@@ -264,12 +299,22 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
     match arguments.first().and_then(|argument| argument.to_str()) {
         Some("exec") => parse_exec(arguments)
             .map(|(selection, command)| CliCommand::Exec { selection, command }),
-        Some("context") => {
-            parse_context_show(&arguments).map(|selection| CliCommand::ContextShow { selection })
-        }
+        Some("context") => parse_context_command(&arguments),
         Some("status") => parse_status(&arguments)
             .map(|(selection, format)| CliCommand::Status { selection, format }),
         _ => Err("usage: authmux <exec|context|status> ...".to_owned()),
+    }
+}
+
+fn parse_context_command(arguments: &[OsString]) -> Result<CliCommand, String> {
+    match arguments.get(1).and_then(|argument| argument.to_str()) {
+        Some("show") => {
+            parse_context_show(arguments).map(|selection| CliCommand::ContextShow { selection })
+        }
+        Some("list") => {
+            parse_context_list(arguments).map(|format| CliCommand::ContextList { format })
+        }
+        _ => Err("usage: authmux context <list|show> ...".to_owned()),
     }
 }
 
@@ -321,6 +366,17 @@ fn parse_context_show(arguments: &[OsString]) -> Result<ContextSelection, String
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "context show requires a Unicode context name".to_owned())?;
             Ok(ContextSelection::Explicit(context_name.to_owned()))
+        }
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
+fn parse_context_list(arguments: &[OsString]) -> Result<ReportFormat, String> {
+    const USAGE: &str = "usage: authmux context list [--json]";
+    match arguments.len() {
+        2 => Ok(ReportFormat::Human),
+        3 if arguments.get(2).and_then(|argument| argument.to_str()) == Some("--json") => {
+            Ok(ReportFormat::Json)
         }
         _ => Err(USAGE.to_owned()),
     }

@@ -11,9 +11,9 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
 use authmux::{
-    AwsAdapter, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
-    ContextListReport, ExecutionFailure, ProjectBinding, SecureProcessRunner, StatusEngine,
-    StatusReport, UserConfig,
+    AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
+    ContextListReport, DoctorOutcome, DoctorReport, ExecutionFailure, ProjectBinding,
+    SecureProcessRunner, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -26,6 +26,7 @@ fn run() -> i32 {
         Ok(CliCommand::ContextShow { selection }) => show_context(selection),
         Ok(CliCommand::ContextList { format }) => show_context_list(format),
         Ok(CliCommand::Status { selection, format }) => show_status(selection, format),
+        Ok(CliCommand::Doctor { selection, format }) => show_doctor(selection, format),
         Err(message) => {
             eprintln!("{message}");
             2
@@ -203,6 +204,60 @@ fn show_status(selection: ContextSelection, format: ReportFormat) -> i32 {
     0
 }
 
+fn show_doctor(selection: ContextSelection, format: ReportFormat) -> i32 {
+    let selection = match resolve_selection(selection) {
+        Ok(selection) => selection,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let (config, _) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let context = match config.resolve_context(&selection.context_name) {
+        Ok(context) => context,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let inherited = ["PATH", "HOME", "LANG", "LC_ALL", "TERM"];
+    let version_runner = match SecureProcessRunner::new(&inherited) {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let status_runner = match SecureProcessRunner::new(&inherited) {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let result = AwsDoctor::new(version_runner, status_runner).diagnose(&context);
+    let outcome = result.outcome();
+    let report = DoctorReport::new(&result);
+    let rendered = match format {
+        ReportFormat::Human => report.render_human(),
+        ReportFormat::Json => match report.render_json() {
+            Ok(json) => json,
+            Err(failure) => {
+                eprintln!("could not render doctor report: {failure}");
+                return 5;
+            }
+        },
+    };
+    print!("{rendered}");
+    i32::from(outcome == DoctorOutcome::Fail)
+}
+
 fn print_context(
     selection: &ResolvedSelection,
     definition: &ContextDefinition,
@@ -277,6 +332,10 @@ enum CliCommand {
         selection: ContextSelection,
         format: ReportFormat,
     },
+    Doctor {
+        selection: ContextSelection,
+        format: ReportFormat,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -302,7 +361,9 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
         Some("context") => parse_context_command(&arguments),
         Some("status") => parse_status(&arguments)
             .map(|(selection, format)| CliCommand::Status { selection, format }),
-        _ => Err("usage: authmux <exec|context|status> ...".to_owned()),
+        Some("doctor") => parse_doctor(&arguments)
+            .map(|(selection, format)| CliCommand::Doctor { selection, format }),
+        _ => Err("usage: authmux <exec|context|doctor|status> ...".to_owned()),
     }
 }
 
@@ -395,6 +456,33 @@ fn parse_status(arguments: &[OsString]) -> Result<(ContextSelection, ReportForma
                     .and_then(|argument| argument.to_str())
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| "status requires a Unicode context name".to_owned())?;
+                selection = Some(ContextSelection::Explicit(context_name.to_owned()));
+                index += 2;
+            }
+            Some("--json") if format == ReportFormat::Human => {
+                format = ReportFormat::Json;
+                index += 1;
+            }
+            _ => return Err(USAGE.to_owned()),
+        }
+    }
+
+    Ok((selection.unwrap_or(ContextSelection::ProjectBound), format))
+}
+
+fn parse_doctor(arguments: &[OsString]) -> Result<(ContextSelection, ReportFormat), String> {
+    const USAGE: &str = "usage: authmux doctor [--context <context>] [--json]";
+    let mut selection = None;
+    let mut format = ReportFormat::Human;
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments.get(index).and_then(|argument| argument.to_str()) {
+            Some("--context") if selection.is_none() => {
+                let context_name = arguments
+                    .get(index + 1)
+                    .and_then(|argument| argument.to_str())
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "doctor requires a Unicode context name".to_owned())?;
                 selection = Some(ContextSelection::Explicit(context_name.to_owned()));
                 index += 2;
             }

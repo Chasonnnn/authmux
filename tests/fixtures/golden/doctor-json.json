@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "command": "doctor",
+  "context": "crm",
+  "result": "pass",
+  "provider_contacted": false,
+  "checks": [
+    {
+      "id": "configuration",
+      "outcome": "pass",
+      "summary": "context resolved"
+    },
+    {
+      "id": "aws_cli",
+      "outcome": "pass",
+      "summary": "AWS CLI 2.36.11 is supported"
+    },
+    {
+      "id": "aws_profile_identity",
+      "outcome": "pass",
+      "summary": "configured account matches expected identity"
+    }
+  ]
+}

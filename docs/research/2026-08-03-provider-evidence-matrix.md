@@ -31,6 +31,7 @@ Installed versions:
 
 | Provider plane | Candidate command | Evidence | Side effects and uncertainty | Output sensitivity | Bound | Decision |
 |---|---|---|---|---|---:|---|
+| AWS CLI installation | `aws --version` | local executable and semantic version | Loads the installed CLI only; does not inspect a Session or contact AWS | runtime, platform, and architecture metadata are discarded after narrow version parsing | 2 s / 4 KiB | doctor-only local check; require AWS CLI v2 |
 | AWS local profile | `aws configure get sso_account_id --profile NAME` | configured account metadata | Reads native config; does not establish Session usability and is absent for many profile types | account ID | 2 s / 4 KiB | possible read-only status evidence, never provider validation |
 | AWS live identity | `aws sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt` | provider-validated account | May retrieve, assume, or automatically refresh temporary credentials and update AWS-owned caches | account ID; native stderr may contain sensitive metadata | 5 s / 4 KiB | allowed for guarded `exec` preflight; prohibited for read-only `status` |
 | AWS login | `aws sso login --profile NAME` | explicit Reauthentication | Opens an authorization flow and writes provider-owned cache state | authorization URLs and organization metadata | interactive | explicit `login` only |
@@ -95,11 +96,11 @@ before it can be implemented honestly.
 
 ## Implementation consequence
 
-`context show` now explains user configuration, Project Binding, Expected
-Identity, and provenance without touching provider state. AWS `status` uses
-only local profile metadata and reports Session Usability as `indeterminate`;
-live `get-caller-identity` remains an `exec` preflight unless a no-write
-provider mechanism is proven. ADR 0002 records this separation.
+`context show` and `context list` explain user configuration without touching
+provider state. AWS `status` uses only local profile metadata and reports
+Session Usability as `indeterminate`. `doctor` adds a narrowly parsed local AWS
+CLI version check. Live `get-caller-identity` remains an `exec` preflight unless
+a no-write provider mechanism is proven. ADR 0002 records this separation.
 
 ## Primary sources
 

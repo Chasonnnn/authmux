@@ -48,14 +48,24 @@ JSON output follows the checked-in, versioned
 are rendered from the same typed observation; neither includes raw provider
 output.
 
+Diagnose local setup without contacting AWS:
+
+```console
+authmux doctor
+authmux doctor --context crm --json
+```
+
+`doctor` checks configuration, requires AWS CLI v2, and compares supported
+local profile metadata. Warnings exit successfully; failed checks exit `1`.
+
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
 mismatch, and otherwise creates a process-scoped environment for one child
 command. A repository binding may select only a user-defined context; it cannot
 override providers or commands, is never discovered above the nearest `.git`
 root, and reports its canonical source path through the Config Module. A
-matching child preserves its exit code or terminating Unix signal. `doctor`,
-`login`, and Google Cloud are still planned work. The `exec` preflight
+matching child preserves its exit code or terminating Unix signal. `login` and
+Google Cloud are still planned work. The `exec` preflight
 uses normal AWS CLI credential
 resolution, which may update AWS-owned caches under its documented behavior;
 authmux does not request login or capture the resulting Credential.

@@ -1,0 +1,7 @@
+doctor: crm
+result: pass
+provider contacted: no
+checks: 3
+- [pass] configuration: context resolved
+- [pass] aws_cli: AWS CLI 2.36.11 is supported
+- [pass] aws_profile_identity: configured account matches expected identity

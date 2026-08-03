@@ -5,12 +5,13 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 
 use crate::{
-    AuthenticationContext, ContextDefinition, EvidenceLevel, IdentityMatch, ObservationReason,
-    ReauthenticationNeed, SessionUsability, StatusObservation,
+    AuthenticationContext, ContextDefinition, DoctorOutcome, DoctorResult, EvidenceLevel,
+    IdentityMatch, ObservationReason, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
 
 const STATUS_SCHEMA_VERSION: u32 = 1;
 const CONTEXT_LIST_SCHEMA_VERSION: u32 = 1;
+const DOCTOR_SCHEMA_VERSION: u32 = 1;
 
 pub struct StatusReport {
     context: String,
@@ -19,6 +20,30 @@ pub struct StatusReport {
 
 pub struct ContextListReport {
     contexts: Vec<ContextListEntry>,
+}
+
+pub struct DoctorReport {
+    context: String,
+    result: &'static str,
+    provider_contacted: bool,
+    checks: Vec<DoctorReportCheck>,
+}
+
+#[derive(Serialize)]
+struct DoctorDocument<'a> {
+    schema_version: u32,
+    command: &'static str,
+    context: &'a str,
+    result: &'static str,
+    provider_contacted: bool,
+    checks: &'a [DoctorReportCheck],
+}
+
+#[derive(Serialize)]
+struct DoctorReportCheck {
+    id: &'static str,
+    outcome: &'static str,
+    summary: String,
 }
 
 #[derive(Serialize)]
@@ -233,6 +258,70 @@ impl ContextListReport {
     }
 }
 
+impl DoctorReport {
+    #[must_use]
+    pub fn new(result: &DoctorResult) -> Self {
+        Self {
+            context: result.context().to_owned(),
+            result: doctor_outcome(result.outcome()),
+            provider_contacted: result.provider_contacted(),
+            checks: result
+                .checks()
+                .iter()
+                .map(|check| DoctorReportCheck {
+                    id: check.id(),
+                    outcome: doctor_outcome(check.outcome()),
+                    summary: check.summary().to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn render_human(&self) -> String {
+        let mut report = String::new();
+        writeln!(report, "doctor: {}", self.context).expect("writing to a String cannot fail");
+        writeln!(report, "result: {}", self.result).expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "provider contacted: {}",
+            if self.provider_contacted { "yes" } else { "no" }
+        )
+        .expect("writing to a String cannot fail");
+        writeln!(report, "checks: {}", self.checks.len()).expect("writing to a String cannot fail");
+        for check in &self.checks {
+            writeln!(
+                report,
+                "- [{}] {}: {}",
+                check.outcome, check.id, check.summary
+            )
+            .expect("writing to a String cannot fail");
+        }
+        report
+    }
+
+    /// Serializes the stable doctor schema without provider output.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the fixed report structure cannot be
+    /// serialized.
+    pub fn render_json(&self) -> Result<String, PresentationFailure> {
+        let document = DoctorDocument {
+            schema_version: DOCTOR_SCHEMA_VERSION,
+            command: "doctor",
+            context: &self.context,
+            result: self.result,
+            provider_contacted: self.provider_contacted,
+            checks: &self.checks,
+        };
+        let mut json = serde_json::to_string_pretty(&document)
+            .map_err(|_| PresentationFailure::new("could not serialize doctor report"))?;
+        json.push('\n');
+        Ok(json)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationFailure {
     message: &'static str,
@@ -293,5 +382,13 @@ const fn evidence_level(value: EvidenceLevel) -> &'static str {
         EvidenceLevel::LocalMetadata => "local_metadata",
         EvidenceLevel::ProviderValidation => "provider_validation",
         EvidenceLevel::ConnectivityOnly => "connectivity_only",
+    }
+}
+
+const fn doctor_outcome(value: DoctorOutcome) -> &'static str {
+    match value {
+        DoctorOutcome::Pass => "pass",
+        DoctorOutcome::Warning => "warning",
+        DoctorOutcome::Fail => "fail",
     }
 }

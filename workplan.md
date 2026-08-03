@@ -129,7 +129,8 @@ Behavioral rules:
 - `status` reports observations and exits nonzero only for command/config
   failure. Individual invalid sessions remain data in the report.
 - `doctor` checks config, executable discovery, supported CLI versions, and
-  safe provider reachability without changing authentication state.
+  only provider observations already proven read-only. AWS 0.1 does not contact
+  AWS. Warnings exit `0`; failed checks exit `1`.
 - `login` shows exactly which Provider Profile will be affected and delegates
   to its native flow.
 - `exec` resolves one context, builds a minimal child environment, and uses an
@@ -337,12 +338,15 @@ Deliverables:
   provenance, and validation.
 - [x] Reject secret-shaped fields and values with redaction-safe errors.
 - [x] Implement the secure process runner with deterministic test execution.
-- [x] Implement `context show` and guarded `exec` for one AWS Authentication
-  Context.
+- [x] Implement `context show`, provider-free `context list`, and guarded
+  `exec` for one AWS Authentication Context.
 - [x] Implement read-only `status` using a local-metadata observation contract,
   not the cache-refreshing execution preflight.
 - [x] Add the AWS Provider Adapter from Phase 0 evidence.
-- [x] Add the stable status JSON schema and terminal golden tests.
+- [x] Add read-only `doctor` checks for config, AWS CLI v2, and local profile
+  identity metadata.
+- [x] Add stable status, context-list, and doctor JSON schemas plus terminal
+  golden tests.
 
 Exit criteria:
 
@@ -470,7 +474,7 @@ is hard to reverse, surprising, and a real trade-off.
   credential helper.
 - Whether a user-owned ADC reference has portable, process-scoped behavior
   across the supported Google client libraries.
-- JSON schema versioning and exit-code taxonomy.
+- Remaining exit-code taxonomy for login and partial multi-provider failure.
 - Distribution channels beyond release binaries.
 
 ## 14. Go/no-go economics

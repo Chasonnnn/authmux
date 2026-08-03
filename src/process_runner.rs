@@ -103,6 +103,20 @@ pub trait ProbeRunner {
     ) -> Result<ProbeOutput, ProviderFailure>;
 }
 
+impl<R> ProbeRunner for &R
+where
+    R: ProbeRunner + ?Sized,
+{
+    fn probe(
+        &self,
+        command: &CommandSpec,
+        selection: &ExecutionSelection,
+        policy: ProbePolicy,
+    ) -> Result<ProbeOutput, ProviderFailure> {
+        (**self).probe(command, selection, policy)
+    }
+}
+
 pub struct SecureProcessRunner {
     inherited_environment: Vec<OsString>,
 }

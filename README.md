@@ -109,6 +109,7 @@ Start here:
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions
+- [GCP Phase 2 contract](docs/research/2026-08-03-gcp-phase-2-contract.md) — separate gcloud/ADC planes and mandatory no-write gate
 
 ## License
 

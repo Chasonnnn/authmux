@@ -154,10 +154,15 @@ description = "CRM project"
 profile = "crm-development"
 expected_account = "123456789012"
 
-[contexts.crm.providers.gcp]
+[contexts.crm.providers.gcp.gcloud]
+config_dir = "/absolute/user-owned/gcloud-config-root"
 configuration = "crm"
-expected_identity = "developer@example.invalid"
-credential_planes = ["cli"]
+expected_principal = "developer@example.invalid"
+
+[contexts.crm.providers.gcp.adc]
+mode = "credential_file"
+credential_file = "/absolute/user-owned/credential-config.json"
+expected_principal = "service-account@example.invalid"
 
 ```
 
@@ -310,6 +315,8 @@ Deliverables:
 - [ ] Treat gcloud CLI authentication and ADC as separate evidence surfaces;
   test selectors across representative client libraries without reading or
   printing credentials.
+- [x] Record the user-only two-plane GCP schema, selector policy, prohibited
+  operations, and synthetic no-write implementation gate.
 - [x] Limit SSH evidence to local readiness in 0.1; do not infer remote
   identity, MFA state, authorization, or expiry from agent inspection.
 - [ ] Validate the proposed status states against real provider evidence.
@@ -369,7 +376,8 @@ Deliverables:
 - [x] Re-resolve the context immediately before process spawn and fail closed
   if the Project Binding, Provider Profile, or Expected Identity changed.
 - [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
-  observations for every declared credential plane.
+  observations for every declared credential plane. Merge the real adapter
+  only after its disposable, network-denied probe-purity gate passes.
 - [ ] Keep GitHub and SSH evidence-only unless Phase 0 proves safe selection.
 - [ ] Refuse unsafe global switching by default.
 - [x] Add cross-context concurrency tests and hostile argument tests.

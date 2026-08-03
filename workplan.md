@@ -299,7 +299,7 @@ Deliverables:
 - [ ] Prove native AWS profiles and modern IAM Identity Center behavior,
   including concurrent profiles that share one SSO session; add no first-class
   external AWS session-tool integration in 0.1.
-- [ ] Compare the fictional AWS mismatch workflow against Atmos and against a
+- [x] Compare the fictional AWS mismatch workflow against Atmos and against a
   `direnv` plus native-CLI control, using Granted for AWS where it is already
   configured; record versioned build-vs-adopt evidence.
 - [ ] Test the GitHub hypothesis of pre-provisioned, user-owned

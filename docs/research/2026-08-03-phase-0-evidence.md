@@ -2,11 +2,10 @@
 
 Date: 2026-08-03
 
-This is a read-only planning snapshot. It records supported public behavior and
-the locally installed CLI versions without inspecting real identities,
+This evidence snapshot records supported public behavior, locally installed
+CLI versions, and isolated fictional trials without inspecting real identities,
 credential caches, or tokens. Provider behavior must still be confirmed with
-fictional, redacted contract fixtures before an Adapter is described as
-supported.
+redacted contract fixtures before an Adapter is described as supported.
 
 ## Local tool surface
 
@@ -43,6 +42,11 @@ Before authmux expands beyond the AWS tracer, run the same fictional mismatch
 workflow in Atmos and with `direnv` plus native CLIs, using Granted for AWS
 where it is already configured. Continue only if the identity guard or
 trust/custody model is materially safer or simpler.
+
+The versioned comparison is complete in
+[`2026-08-03-build-vs-adopt-benchmark.md`](./2026-08-03-build-vs-adopt-benchmark.md).
+It supports continuing only the narrow native-custody identity guard. Granted
+was not installed or configured, so it was correctly omitted from the control.
 
 ## Provider feasibility
 

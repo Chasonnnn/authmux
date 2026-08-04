@@ -181,7 +181,7 @@ fn gcp_login_reports_a_missing_native_executable_without_provider_output() {
         .args(["login", "crm", "--provider", "gcp"])
         .env("HOME", fixture.path.join("home"))
         .env("XDG_CONFIG_HOME", fixture.path.join("config"))
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", fixture.path.join("missing-bin"))
         .output()
         .expect("authmux runs");
 

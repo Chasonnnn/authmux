@@ -57,7 +57,7 @@ struct ContextListDocument<'a> {
 struct ContextListEntry {
     name: String,
     description: Option<String>,
-    providers: [ProviderReference; 1],
+    providers: Vec<ProviderReference>,
 }
 
 #[derive(Serialize)]
@@ -196,15 +196,25 @@ impl ContextListReport {
         let contexts = definitions
             .iter()
             .map(|definition| {
-                let context = definition.context();
-                ContextListEntry {
-                    name: context.name().to_owned(),
-                    description: definition.description().map(str::to_owned),
-                    providers: [ProviderReference {
+                let mut providers = Vec::new();
+                if let Some(context) = definition.aws() {
+                    providers.push(ProviderReference {
                         provider: "aws",
                         profile: context.provider_profile().to_owned(),
                         expected_identity: context.expected_account().to_owned(),
-                    }],
+                    });
+                }
+                if let Some(ssh) = definition.ssh() {
+                    providers.push(ProviderReference {
+                        provider: "ssh",
+                        profile: ssh.host_alias().to_owned(),
+                        expected_identity: ssh.expected_remote_principal().to_owned(),
+                    });
+                }
+                ContextListEntry {
+                    name: definition.name().to_owned(),
+                    description: definition.description().map(str::to_owned),
+                    providers,
                 }
             })
             .collect();
@@ -217,7 +227,6 @@ impl ContextListReport {
         writeln!(report, "contexts: {}", self.contexts.len())
             .expect("writing to a String cannot fail");
         for context in &self.contexts {
-            let provider = &context.providers[0];
             writeln!(report, "- {}", context.name).expect("writing to a String cannot fail");
             writeln!(
                 report,
@@ -225,14 +234,31 @@ impl ContextListReport {
                 context.description.as_deref().unwrap_or("(none)")
             )
             .expect("writing to a String cannot fail");
-            writeln!(report, "  aws profile: {}", provider.profile)
-                .expect("writing to a String cannot fail");
-            writeln!(
-                report,
-                "  expected AWS account: {}",
-                provider.expected_identity
-            )
-            .expect("writing to a String cannot fail");
+            for provider in &context.providers {
+                match provider.provider {
+                    "aws" => {
+                        writeln!(report, "  aws profile: {}", provider.profile)
+                            .expect("writing to a String cannot fail");
+                        writeln!(
+                            report,
+                            "  expected AWS account: {}",
+                            provider.expected_identity
+                        )
+                        .expect("writing to a String cannot fail");
+                    }
+                    "ssh" => {
+                        writeln!(report, "  ssh host alias: {}", provider.profile)
+                            .expect("writing to a String cannot fail");
+                        writeln!(
+                            report,
+                            "  expected SSH remote principal: {}",
+                            provider.expected_identity
+                        )
+                        .expect("writing to a String cannot fail");
+                    }
+                    _ => unreachable!("only typed providers enter context reports"),
+                }
+            }
             writeln!(report, "  provider state: not observed")
                 .expect("writing to a String cannot fail");
         }

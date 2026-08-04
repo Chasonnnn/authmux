@@ -84,6 +84,54 @@ fn display_description_does_not_change_context_resolution() {
 }
 
 #[test]
+fn ssh_only_context_resolves_user_owned_intent_metadata() {
+    let source = "version = 1\n\
+                  [contexts.empire]\n\
+                  description = \"Fictional Empire AI project\"\n\
+                  [contexts.empire.providers.ssh]\n\
+                  host_alias = \"empire-alpha\"\n\
+                  expected_remote_principal = \"researcher@example.invalid\"\n";
+
+    let config = UserConfig::parse(source).expect("SSH intent metadata is valid");
+    let definition = config
+        .resolve_context_definition("empire")
+        .expect("SSH-only context resolves for inspection");
+    let ssh = definition.ssh().expect("SSH Provider Profile is available");
+
+    assert_eq!(definition.name(), "empire");
+    assert_eq!(
+        definition.description(),
+        Some("Fictional Empire AI project")
+    );
+    assert!(definition.aws().is_none());
+    assert_eq!(ssh.host_alias(), "empire-alpha");
+    assert_eq!(
+        ssh.expected_remote_principal(),
+        "researcher@example.invalid"
+    );
+}
+
+#[test]
+fn option_shaped_ssh_host_alias_is_rejected_without_echoing_it() {
+    let seeded_alias = "-oProxyCommand=fictional-sensitive-command";
+    let source = format!(
+        "version = 1\n\
+         [contexts.empire.providers.ssh]\n\
+         host_alias = \"{seeded_alias}\"\n\
+         expected_remote_principal = \"researcher@example.invalid\"\n"
+    );
+
+    let failure = UserConfig::parse(&source).expect_err("unsafe SSH aliases must be rejected");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "user configuration contains an invalid SSH host alias"
+    );
+    assert!(!diagnostic.contains(seeded_alias));
+}
+
+#[test]
 fn project_binding_reports_repository_root_provenance() {
     let fixture = FixtureDirectory::new("binding-provenance");
     fs::create_dir_all(fixture.path.join(".git")).expect("repository marker is created");

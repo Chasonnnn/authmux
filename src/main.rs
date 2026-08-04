@@ -263,8 +263,7 @@ fn print_context(
     definition: &ContextDefinition,
     definition_source: &std::path::Path,
 ) {
-    let context = definition.context();
-    println!("context: {}", context.name());
+    println!("context: {}", definition.name());
     match &selection.source {
         SelectionSource::CommandLine => println!("selection: command line"),
         SelectionSource::ProjectBinding(source) => {
@@ -277,8 +276,17 @@ fn print_context(
         definition.description().unwrap_or("(none)")
     );
     println!("definition source: {}", render_path(definition_source));
-    println!("aws profile: {}", context.provider_profile());
-    println!("expected AWS account: {}", context.expected_account());
+    if let Some(context) = definition.aws() {
+        println!("aws profile: {}", context.provider_profile());
+        println!("expected AWS account: {}", context.expected_account());
+    }
+    if let Some(ssh) = definition.ssh() {
+        println!("ssh host alias: {}", ssh.host_alias());
+        println!(
+            "expected SSH remote principal: {}",
+            ssh.expected_remote_principal()
+        );
+    }
     println!("provider state: not observed");
 }
 

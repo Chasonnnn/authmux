@@ -298,6 +298,41 @@ fn exec_refuses_a_context_changed_during_provider_validation() {
     );
 }
 
+#[test]
+fn exec_rejects_ssh_only_context_before_observation_or_child_spawn() {
+    let fixture = FixtureDirectory::new("ssh-exec-unsupported");
+    let bin_directory = fixture.configure_ssh_context();
+    let child_marker = fixture.path.join("child-ran");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "empire",
+            "--",
+            "/usr/bin/touch",
+            child_marker.to_str().expect("fixture path is UTF-8"),
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stdout.is_empty());
+    assert_eq!(
+        stderr,
+        "requested authentication context does not define AWS required by this command\n"
+    );
+    assert!(!child_marker.exists(), "SSH exec must not spawn the child");
+    assert!(
+        !fixture.path.join("provider-ran").exists(),
+        "SSH exec must not observe a provider"
+    );
+}
+
 struct FixtureDirectory {
     path: PathBuf,
 }
@@ -388,6 +423,37 @@ impl FixtureDirectory {
         )
         .expect("fictional user config is written");
 
+        bin_directory
+    }
+
+    fn configure_ssh_context(&self) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        let config_directory = self.path.join("config").join("authmux");
+        fs::create_dir_all(&bin_directory).expect("fixture bin directory is created");
+        fs::create_dir_all(&config_directory).expect("fixture config directory is created");
+        let provider_marker = self.path.join("provider-ran");
+        let ssh = bin_directory.join("ssh");
+        fs::write(
+            &ssh,
+            format!(
+                "#!/bin/sh\ntouch '{}'\nexit 97\n",
+                provider_marker.display()
+            ),
+        )
+        .expect("fictional SSH fixture is written");
+        let mut permissions = fs::metadata(&ssh)
+            .expect("fixture metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&ssh, permissions).expect("fictional SSH fixture is executable");
+        fs::write(
+            config_directory.join("config.toml"),
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n",
+        )
+        .expect("fictional SSH user config is written");
         bin_directory
     }
 

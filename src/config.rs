@@ -25,7 +25,8 @@ struct ContextConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProviderConfigs {
-    aws: AwsConfig,
+    aws: Option<AwsConfig>,
+    ssh: Option<SshConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +34,13 @@ struct ProviderConfigs {
 struct AwsConfig {
     profile: String,
     expected_account: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SshConfig {
+    host_alias: String,
+    expected_remote_principal: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,19 +64,49 @@ pub struct ProjectBinding {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextDefinition {
-    context: AuthenticationContext,
+    name: String,
+    aws: Option<AuthenticationContext>,
+    ssh: Option<SshProviderDefinition>,
     description: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SshProviderDefinition {
+    host_alias: String,
+    expected_remote_principal: String,
 }
 
 impl ContextDefinition {
     #[must_use]
-    pub fn context(&self) -> &AuthenticationContext {
-        &self.context
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn aws(&self) -> Option<&AuthenticationContext> {
+        self.aws.as_ref()
+    }
+
+    #[must_use]
+    pub fn ssh(&self) -> Option<&SshProviderDefinition> {
+        self.ssh.as_ref()
     }
 
     #[must_use]
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
+    }
+}
+
+impl SshProviderDefinition {
+    #[must_use]
+    pub fn host_alias(&self) -> &str {
+        &self.host_alias
+    }
+
+    #[must_use]
+    pub fn expected_remote_principal(&self) -> &str {
+        &self.expected_remote_principal
     }
 }
 
@@ -185,24 +223,7 @@ impl UserConfig {
                 "user configuration contains an unsafe context name",
             ));
         }
-        if config
-            .contexts
-            .values()
-            .any(|context| looks_secret_shaped(&context.providers.aws.profile))
-        {
-            return Err(ConfigFailure::new(
-                "user configuration contains a secret-shaped value where a provider profile was expected",
-            ));
-        }
-        if config
-            .contexts
-            .values()
-            .any(|context| has_unsafe_display_characters(&context.providers.aws.profile))
-        {
-            return Err(ConfigFailure::new(
-                "user configuration contains an unsafe provider profile",
-            ));
-        }
+        validate_provider_configs(&config)?;
         if config.contexts.values().any(|context| {
             context
                 .description
@@ -236,7 +257,13 @@ impl UserConfig {
         context_name: &str,
     ) -> Result<AuthenticationContext, ConfigFailure> {
         self.resolve_context_definition(context_name)
-            .map(|definition| definition.context)
+            .and_then(|definition| {
+                definition.aws.ok_or_else(|| {
+                    ConfigFailure::new(
+                        "requested authentication context does not define AWS required by this command",
+                    )
+                })
+            })
     }
 
     /// Resolves every configured Authentication Context in stable name order.
@@ -265,15 +292,34 @@ impl UserConfig {
             .get(context_name)
             .ok_or_else(|| ConfigFailure::new("requested authentication context is not defined"))?;
 
-        let authentication_context = AuthenticationContext::aws(
-            context_name,
-            &context.providers.aws.profile,
-            &context.providers.aws.expected_account,
-        )
-        .map_err(ConfigFailure::from)?;
+        if context.providers.aws.is_none() && context.providers.ssh.is_none() {
+            return Err(ConfigFailure::new(
+                "authentication context must define at least one provider",
+            ));
+        }
+
+        let aws = context
+            .providers
+            .aws
+            .as_ref()
+            .map(|aws| {
+                AuthenticationContext::aws(context_name, &aws.profile, &aws.expected_account)
+            })
+            .transpose()
+            .map_err(ConfigFailure::from)?;
+        let ssh = context
+            .providers
+            .ssh
+            .as_ref()
+            .map(|ssh| SshProviderDefinition {
+                host_alias: ssh.host_alias.clone(),
+                expected_remote_principal: ssh.expected_remote_principal.clone(),
+            });
 
         Ok(ContextDefinition {
-            context: authentication_context,
+            name: context_name.to_owned(),
+            aws,
+            ssh,
             description: context.description.clone(),
         })
     }
@@ -337,6 +383,79 @@ fn has_unsafe_display_characters(value: &str) -> bool {
                         ..='\u{2069}'
                 )
         })
+}
+
+fn valid_ssh_host_alias(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && !value.starts_with('-')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .aws
+            .as_ref()
+            .is_some_and(|aws| looks_secret_shaped(&aws.profile))
+            || context.providers.ssh.as_ref().is_some_and(|ssh| {
+                looks_secret_shaped(&ssh.host_alias)
+                    || looks_secret_shaped(&ssh.expected_remote_principal)
+            })
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains a secret-shaped value where a provider profile was expected",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .aws
+            .as_ref()
+            .is_some_and(|aws| has_unsafe_display_characters(&aws.profile))
+            || context.providers.ssh.as_ref().is_some_and(|ssh| {
+                has_unsafe_display_characters(&ssh.host_alias)
+                    || has_unsafe_display_characters(&ssh.expected_remote_principal)
+            })
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an unsafe provider profile",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .ssh
+            .as_ref()
+            .is_some_and(|ssh| !valid_ssh_host_alias(&ssh.host_alias))
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid SSH host alias",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context.providers.ssh.as_ref().is_some_and(|ssh| {
+            ssh.expected_remote_principal.trim().is_empty()
+                || ssh.expected_remote_principal.trim() != ssh.expected_remote_principal
+        })
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid SSH Expected Identity",
+        ));
+    }
+    if config
+        .contexts
+        .values()
+        .any(|context| context.providers.aws.is_none() && context.providers.ssh.is_none())
+    {
+        return Err(ConfigFailure::new(
+            "authentication context must define at least one provider",
+        ));
+    }
+    Ok(())
 }
 
 fn repository_root(start: &Path) -> Result<PathBuf, ConfigFailure> {

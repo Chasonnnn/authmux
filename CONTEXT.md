@@ -18,7 +18,8 @@ _Avoid_: Account when the provider-specific meaning is unclear
 
 **Provider Profile**:
 A native, non-secret selector intended to resolve to a Provider Identity, such
-as an AWS profile or Google Cloud configuration name.
+as an AWS profile, Google Cloud configuration name, or user-owned SSH host
+alias.
 _Avoid_: Credential profile, secret profile
 
 **Expected Identity**:

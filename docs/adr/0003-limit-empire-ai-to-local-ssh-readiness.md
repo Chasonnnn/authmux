@@ -42,10 +42,13 @@ The first Empire AI slice is a bounded local-readiness Module:
 - do not infer an Observed Identity, Identity Match, Session Usability,
   Reauthentication Need, MFA state, or expiration from local readiness.
 
-Empire AI host and Expected Identity configuration, CLI `status` and `doctor`
-integration, and explicit interactive terminal handoff require separate
-behavior slices. Hostnames remain user configuration and are never hardcoded
-from institution-specific documentation.
+Empire AI host alias and Expected Identity are accepted in user configuration
+and can be inspected without invoking OpenSSH. CLI `doctor` integration and
+explicit interactive terminal handoff require separate behavior slices.
+Hostnames remain user configuration and are never hardcoded from
+institution-specific documentation. SSH-only `status` and `exec` fail before
+provider observation or child execution because no remote evidence or safe
+Execution Scope exists yet.
 
 ## Consequences
 

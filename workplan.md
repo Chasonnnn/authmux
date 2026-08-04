@@ -140,10 +140,10 @@ Behavioral rules:
 
 ## 7. Configuration sketch
 
-The final schema is a Phase 1 deliverable; this sketch defines the security
-and usability constraints, not a frozen contract. The current AWS-only tracer
-accepts the AWS subset, optional context descriptions, and the restricted
-repository binding; Google Cloud remains unimplemented.
+The schema is versioned and remains pre-1.0. The current tracer accepts optional
+AWS and SSH Provider Profiles, optional context descriptions, and the
+restricted repository binding; Google Cloud remains unimplemented. Existing
+AWS-only version 1 configuration requires no migration.
 
 ```toml
 version = 1
@@ -154,6 +154,10 @@ description = "CRM project"
 [contexts.crm.providers.aws]
 profile = "crm-development"
 expected_account = "123456789012"
+
+[contexts.empire.providers.ssh]
+host_alias = "empire-alpha"
+expected_remote_principal = "researcher@example.invalid"
 
 [contexts.crm.providers.gcp.gcloud]
 config_dir = "/absolute/user-owned/gcloud-config-root"
@@ -384,9 +388,11 @@ Deliverables:
 - [x] Add a bounded OpenSSH client readiness Module as the first Empire AI
   local-readiness slice; keep remote identity, MFA, authorization, expiry, and
   execution selection explicitly unsupported.
-- [ ] Add user-owned Empire AI host and Expected Identity configuration, then
-  expose local readiness through `status` and `doctor` without evaluating SSH
-  configuration or contacting the cluster.
+- [x] Add user-owned Empire AI host alias and Expected Identity configuration
+  with provider-free context inspection.
+- [ ] Expose OpenSSH readiness through provider-scoped `doctor` without
+  evaluating SSH configuration or contacting the cluster; keep `status` and
+  `exec` unsupported until stronger evidence and a safe Execution Scope exist.
 - [ ] Refuse unsafe global switching by default.
 - [x] Add cross-context concurrency tests and hostile argument tests.
 

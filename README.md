@@ -108,7 +108,23 @@ This proves only that a supported OpenSSH client is installed. Remote identity,
 authorization, MFA state, Session Usability, and expiry remain unobserved.
 
 The user configuration remains at
-`$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`. The
+`$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`.
+Empire AI intent can be declared without a Credential or machine-specific key
+path:
+
+```toml
+version = 1
+
+[contexts.empire]
+description = "Empire AI research"
+
+[contexts.empire.providers.ssh]
+host_alias = "empire-alpha"
+expected_remote_principal = "researcher@example.invalid"
+```
+
+`host_alias` names user-owned SSH intent; authmux does not evaluate the SSH
+configuration behind it. Existing AWS-only configuration remains valid. The
 optional root binding contains only:
 
 ```toml

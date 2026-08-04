@@ -97,6 +97,46 @@ fn context_show_reports_project_binding_provenance_from_a_nested_directory() {
     assert!(!provider_marker.exists(), "context show must not run AWS");
 }
 
+#[test]
+fn context_show_reports_ssh_intent_without_observing_openssh() {
+    let fixture = FixtureDirectory::new("context-show-ssh");
+    let (bin_directory, provider_marker) = fixture.configure();
+    fs::write(
+        fixture
+            .path
+            .join("config")
+            .join("authmux")
+            .join("config.toml"),
+        "version = 1\n\
+         [contexts.empire]\n\
+         description = \"Fictional Empire AI project\"\n\
+         [contexts.empire.providers.ssh]\n\
+         host_alias = \"empire-alpha\"\n\
+         expected_remote_principal = \"researcher@example.invalid\"\n",
+    )
+    .expect("fictional SSH user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["context", "show", "--context", "empire"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("context: empire\n"));
+    assert!(stdout.contains("ssh host alias: empire-alpha\n"));
+    assert!(stdout.contains("expected SSH remote principal: researcher@example.invalid\n"));
+    assert!(stdout.contains("provider state: not observed\n"));
+    assert!(stderr.is_empty());
+    assert!(
+        !provider_marker.exists(),
+        "context show must not run a provider"
+    );
+}
+
 struct FixtureDirectory {
     path: PathBuf,
 }

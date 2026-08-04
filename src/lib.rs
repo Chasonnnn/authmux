@@ -10,7 +10,9 @@ mod process_runner;
 mod ssh_readiness;
 
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
-pub use config::{ConfigFailure, ContextDefinition, ProjectBinding, UserConfig};
+pub use config::{
+    ConfigFailure, ContextDefinition, ProjectBinding, SshProviderDefinition, UserConfig,
+};
 pub use context_engine::{
     ContextEngine, ExecutionContextResolver, ProcessRunner, ProviderAdapter, StatusAdapter,
     StatusEngine,

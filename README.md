@@ -78,8 +78,10 @@ Cloud `status`, `doctor`, and guarded `exec` are implemented. A native gcloud
 child requires matching protected gcloud identity and project metadata; every
 other GCP child requires a protected, explicitly declared ADC credential-file
 plane. GCP execution does not claim live credential usability before spawn,
-and mixed-provider execution remains unsupported. GCP `login` remains planned
-work. The AWS `exec` preflight uses
+and mixed-provider execution remains unsupported. Explicit GCP login delegates
+`gcloud auth login` to the selected named configuration with the terminal
+attached; it never updates ADC or claims live success from the native exit
+alone. The AWS `exec` preflight uses
 normal AWS CLI credential resolution, which may update AWS-owned caches under
 its documented behavior; authmux does not request login or capture the
 resulting Credential.
@@ -133,6 +135,20 @@ cargo test --test live_gcp -- --ignored --exact \
 It runs `gcloud projects describe` through authmux and checks only the expected
 project identifier. Provider failure output is intentionally omitted by the
 test.
+
+For explicit interactive recovery plus the provider operation, use the
+credential-mutating E2E gate:
+
+```console
+AUTHMUX_LIVE_GCP_CONTEXT=crm \
+AUTHMUX_LIVE_GCP_EXPECTED_PROJECT=fictional-project \
+AUTHMUX_LIVE_GCP_ACKNOWLEDGE_LOGIN_MUTATION=1 \
+cargo test --test live_gcp -- --ignored --exact \
+  configured_gcp_context_completes_the_live_login_and_exec_workflow
+```
+
+The native login inherits the terminal and may open a browser. The test does
+not capture its output, authorization URL, or input.
 
 Empire AI work begins with an OpenSSH client readiness check that does not read
 SSH configuration, inspect an agent, resolve or contact a host, or trigger MFA.
@@ -211,6 +227,7 @@ Start here:
 - [ADR 0002](docs/adr/0002-separate-status-from-execution-preflight.md) — read-only status boundary
 - [ADR 0006](docs/adr/0006-observe-gcp-selection-without-running-gcloud.md) — zero-write GCP observation boundary
 - [ADR 0007](docs/adr/0007-guard-gcp-exec-with-local-selection.md) — guarded GCP execution boundary
+- [ADR 0008](docs/adr/0008-delegate-gcp-login-to-selected-gcloud-configuration.md) — explicit native GCP login
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

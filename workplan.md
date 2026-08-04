@@ -430,8 +430,11 @@ Exit criteria:
 
 Deliverables:
 
-- [ ] Implement `login` plans for all initial providers; SSH is implemented and
-  AWS remains.
+- [ ] Implement `login` plans for all initial providers; GCP and SSH are
+  implemented and AWS remains.
+- [x] Delegate explicit GCP user reauthentication to `gcloud auth login` under
+  the selected named configuration, with a direct terminal, no ADC mutation,
+  and material pre-spawn revalidation under ADR 0008.
 - [x] Preview the affected SSH Provider Profile and native command before
   mutation.
 - [x] Support SSH interactive terminal handoff without capturing secrets.

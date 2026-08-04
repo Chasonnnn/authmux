@@ -81,6 +81,51 @@ fn configured_gcp_context_completes_the_live_exec_workflow() {
     );
 }
 
+#[test]
+#[ignore = "opens an interactive browser login and mutates provider-owned gcloud credential state"]
+fn configured_gcp_context_completes_the_live_login_and_exec_workflow() {
+    let context = required_environment("AUTHMUX_LIVE_GCP_CONTEXT");
+    let project = required_environment("AUTHMUX_LIVE_GCP_EXPECTED_PROJECT");
+    assert_eq!(
+        required_environment("AUTHMUX_LIVE_GCP_ACKNOWLEDGE_LOGIN_MUTATION"),
+        "1",
+        "live GCP login requires explicit credential-state mutation acknowledgement"
+    );
+
+    let login = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", context.to_str().expect("context is Unicode")])
+        .status()
+        .expect("authmux login runs with the terminal attached");
+    assert_eq!(
+        login.code(),
+        Some(0),
+        "live GCP login failed; native provider output is not captured by the test"
+    );
+
+    let output = run_authmux(&[
+        OsString::from("exec"),
+        OsString::from("--context"),
+        context,
+        OsString::from("--"),
+        OsString::from("gcloud"),
+        OsString::from("projects"),
+        OsString::from("describe"),
+        project.clone(),
+        OsString::from("--format=value(projectId)"),
+        OsString::from("--quiet"),
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "post-login GCP exec failed; provider output intentionally omitted"
+    );
+    let expected = [project.as_encoded_bytes(), b"\n"].concat();
+    assert!(
+        output.stdout == expected,
+        "post-login GCP exec returned an unexpected project; provider output intentionally omitted"
+    );
+}
+
 fn required_environment(name: &str) -> OsString {
     std::env::var_os(name).unwrap_or_else(|| panic!("{name} must be set for the live GCP gate"))
 }

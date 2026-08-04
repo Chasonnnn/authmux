@@ -148,6 +148,10 @@ Status, doctor, and parsers must never use:
 - credential database, token cache, ADC file, or raw broad-config parsing;
 - `CLOUDSDK_CONFIG` as an ADC selector.
 
+ADR 0008 later permits `gcloud auth login` only from the explicit interactive
+`login` command. It remains prohibited from `status`, `doctor`, `exec`, and
+parsers, and it never uses `--update-adc`.
+
 ## Mandatory implementation gate
 
 Before merging a real gcloud Status Adapter, run the candidate commands against

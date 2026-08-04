@@ -38,3 +38,22 @@ declared project identifier. It does not print provider failure output or
 claim generic ADC usability. Passing proves the current gcloud child path for
 that configured account and project; it does not prove future refresh,
 authorization for other resources, expiry, or non-gcloud client behavior.
+
+## Interactive login and execution gate
+
+The complete recovery path is separately opt-in because it opens a browser and
+replaces provider-owned gcloud credential state:
+
+```console
+AUTHMUX_LIVE_GCP_CONTEXT=crm \
+AUTHMUX_LIVE_GCP_EXPECTED_PROJECT=fictional-project \
+AUTHMUX_LIVE_GCP_ACKNOWLEDGE_LOGIN_MUTATION=1 \
+cargo test --test live_gcp -- --ignored --exact \
+  configured_gcp_context_completes_the_live_login_and_exec_workflow
+```
+
+The native login inherits the terminal directly. The test does not capture
+browser URLs, authorization input, stdout, or stderr. After native exit zero,
+it runs the guarded project description and accepts only the declared project
+identifier. Passing proves the configured gcloud login and resource-operation
+path at that observation time; it does not validate ADC or infer expiry.

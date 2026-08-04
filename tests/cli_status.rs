@@ -346,7 +346,7 @@ impl SshHomeFixture {
             .expect("clock is after the Unix epoch")
             .as_nanos()
             % 1_000_000_000;
-        let path = PathBuf::from("/private/tmp")
+        let path = short_socket_temp_root()
             .join(format!("amux-cs-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(path.join("home/.ssh")).expect("SSH fixture directory is created");
         let mut permissions = fs::metadata(path.join("home/.ssh"))
@@ -378,6 +378,17 @@ impl SshHomeFixture {
         permissions.set_mode(0o700);
         fs::set_permissions(&ssh, permissions).expect("fictional ssh is executable");
         bin_directory
+    }
+}
+
+fn short_socket_temp_root() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/private/tmp")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::temp_dir()
     }
 }
 

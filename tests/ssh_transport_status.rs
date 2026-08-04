@@ -137,7 +137,7 @@ impl StatusFixture {
             .duration_since(UNIX_EPOCH)
             .expect("clock is after epoch")
             .as_nanos();
-        let path = PathBuf::from("/private/tmp").join(format!(
+        let path = short_socket_temp_root().join(format!(
             "amux-st-{label}-{}-{}",
             std::process::id(),
             nonce % 1_000_000_000
@@ -169,6 +169,17 @@ impl StatusFixture {
             .ssh()
             .expect("fixture SSH profile resolves")
             .clone()
+    }
+}
+
+fn short_socket_temp_root() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/private/tmp")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::temp_dir()
     }
 }
 

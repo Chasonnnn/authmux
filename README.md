@@ -100,6 +100,12 @@ normal AWS CLI credential resolution, which may update AWS-owned caches under
 its documented behavior; authmux does not request login or capture the
 resulting Credential.
 
+Every explicit native login runs at most one selected provider, has no authmux
+timeout while the user completes its interactive flow, preserves native
+nonzero exits and Unix signals, and never retries or falls through to another
+provider. Mixed-provider Authentication Contexts require `--provider` before
+any native command starts.
+
 Child processes inherit only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TERM`, plus
 the selected provider profile. Credential environment variables and unrelated
 parent state are removed. Immediately before spawn, authmux re-reads the

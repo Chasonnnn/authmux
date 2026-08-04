@@ -14,10 +14,10 @@ use nix::unistd::Pid;
 use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, AwsLoginPlan, AwsLoginPlanner, CommandSpec,
     ContextDefinition, ContextEngine, ContextListReport, DoctorOutcome, DoctorReport,
-    ExecutionContextResolver, ExecutionFailure, ExecutionSelection, GcpDoctor, GcpExecutionFailure,
-    GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, ProcessRunner, ProjectBinding,
-    SecureProcessRunner, SshDoctor, SshTransportObservation, SshTransportReuse, SshTransportStatus,
-    StatusEngine, StatusReport, UserConfig,
+    ExecutionContextResolver, ExecutionFailure, ExecutionOutcome, ExecutionSelection, GcpDoctor,
+    GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, ProcessRunner,
+    ProjectBinding, SecureProcessRunner, SshDoctor, SshTransportObservation, SshTransportReuse,
+    SshTransportStatus, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -183,22 +183,14 @@ fn run_aws_login(plan: &AwsLoginPlan) -> i32 {
         }
     };
     match runner.run(plan.command(), plan.selection()) {
-        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
-            (Some(0), None) => {
+        Ok(outcome) => match finish_native_login(outcome, "AWS") {
+            Ok(()) => {
                 println!(
                     "result: native AWS login command exited successfully; live session usability remains unverified"
                 );
                 0
             }
-            (Some(code), None) => {
-                eprintln!("native AWS login command exited with status {code}");
-                code
-            }
-            (None, Some(signal)) => terminate_with_signal(signal),
-            _ => {
-                eprintln!("native AWS login command ended without an exit code or signal");
-                5
-            }
+            Err(exit_code) => exit_code,
         },
         Err(failure) => {
             eprintln!("{failure}");
@@ -257,22 +249,14 @@ fn login_gcp(definition: &ContextDefinition) -> i32 {
         }
     };
     match runner.run(plan.command(), plan.selection()) {
-        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
-            (Some(0), None) => {
+        Ok(outcome) => match finish_native_login(outcome, "GCP") {
+            Ok(()) => {
                 println!(
                     "result: native GCP login command exited successfully; live session usability remains unverified"
                 );
                 0
             }
-            (Some(code), None) => {
-                eprintln!("native GCP login command exited with status {code}");
-                code
-            }
-            (None, Some(signal)) => terminate_with_signal(signal),
-            _ => {
-                eprintln!("native GCP login command ended without an exit code or signal");
-                5
-            }
+            Err(exit_code) => exit_code,
         },
         Err(failure) => {
             eprintln!("{failure}");
@@ -315,8 +299,8 @@ fn login_ssh(definition: &ContextDefinition) -> i32 {
         }
     };
     match runner.run(&command, &ExecutionSelection::none()) {
-        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
-            (Some(0), None) => {
+        Ok(outcome) => match finish_native_login(outcome, "SSH") {
+            Ok(()) => {
                 println!(
                     "result: native login command exited successfully; remote session usability remains unverified"
                 );
@@ -329,19 +313,26 @@ fn login_ssh(definition: &ContextDefinition) -> i32 {
                 }
                 0
             }
-            (Some(code), None) => {
-                eprintln!("native SSH login command exited with status {code}");
-                code
-            }
-            (None, Some(signal)) => terminate_with_signal(signal),
-            _ => {
-                eprintln!("native SSH login command ended without an exit code or signal");
-                5
-            }
+            Err(exit_code) => exit_code,
         },
         Err(failure) => {
             eprintln!("{failure}");
             exit_code(&failure)
+        }
+    }
+}
+
+fn finish_native_login(outcome: ExecutionOutcome, provider: &str) -> Result<(), i32> {
+    match (outcome.exit_code(), outcome.signal()) {
+        (Some(0), None) => Ok(()),
+        (Some(code), None) => {
+            eprintln!("native {provider} login command exited with status {code}");
+            Err(code)
+        }
+        (None, Some(signal)) => Err(terminate_with_signal(signal)),
+        _ => {
+            eprintln!("native {provider} login command ended without an exit code or signal");
+            Err(5)
         }
     }
 }

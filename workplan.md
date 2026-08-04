@@ -446,8 +446,10 @@ Deliverables:
 - [x] Support SSH interactive terminal handoff without capturing secrets.
 - [x] Re-observe protected local SSH Transport Reuse after successful native
   login and display the result without claiming remote Session Usability.
-- [ ] Handle cancellation, timeout, native failure, and partial multi-provider
-  completion without silent retry.
+- [x] Preserve native cancellation signals and failure exits through one shared
+  outcome path, keep interactive login unbounded by an authmux timeout, and
+  require one explicit provider for mixed contexts so partial multi-provider
+  login and silent retry cannot occur.
 
 Exit criteria:
 

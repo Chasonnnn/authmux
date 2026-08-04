@@ -8,6 +8,8 @@ mod domain;
 mod presentation;
 mod process_runner;
 mod ssh_readiness;
+#[cfg(unix)]
+mod ssh_transport_status;
 
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
 pub use config::{
@@ -27,3 +29,5 @@ pub use presentation::{ContextListReport, DoctorReport, PresentationFailure, Sta
 pub use process_runner::SecureProcessRunner;
 pub use process_runner::{ProbeOutput, ProbePolicy, ProbeRunner};
 pub use ssh_readiness::{SshClientReadiness, SshClientReadinessCheck};
+#[cfg(unix)]
+pub use ssh_transport_status::{SshTransportObservation, SshTransportReuse, SshTransportStatus};

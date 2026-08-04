@@ -41,6 +41,7 @@ struct AwsConfig {
 struct SshConfig {
     host_alias: String,
     expected_remote_principal: String,
+    control_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +75,7 @@ pub struct ContextDefinition {
 pub struct SshProviderDefinition {
     host_alias: String,
     expected_remote_principal: String,
+    control_path: Option<PathBuf>,
 }
 
 impl ContextDefinition {
@@ -107,6 +109,11 @@ impl SshProviderDefinition {
     #[must_use]
     pub fn expected_remote_principal(&self) -> &str {
         &self.expected_remote_principal
+    }
+
+    #[must_use]
+    pub fn control_path(&self) -> Option<&Path> {
+        self.control_path.as_deref()
     }
 }
 
@@ -314,6 +321,7 @@ impl UserConfig {
             .map(|ssh| SshProviderDefinition {
                 host_alias: ssh.host_alias.clone(),
                 expected_remote_principal: ssh.expected_remote_principal.clone(),
+                control_path: ssh.control_path.clone(),
             });
 
         Ok(ContextDefinition {
@@ -394,6 +402,28 @@ fn valid_ssh_host_alias(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+fn valid_ssh_control_path(path: &Path) -> bool {
+    path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+        && path
+            .to_str()
+            .is_some_and(|value| !has_unsafe_display_characters(value))
+}
+
+fn ssh_control_path_looks_secret_shaped(path: &Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(value) = component else {
+            return false;
+        };
+        value.to_str().is_some_and(looks_secret_shaped)
+    })
+}
+
 fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
     if config.contexts.values().any(|context| {
         context
@@ -430,10 +460,34 @@ fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
             .providers
             .ssh
             .as_ref()
+            .and_then(|ssh| ssh.control_path.as_deref())
+            .is_some_and(ssh_control_path_looks_secret_shaped)
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains a secret-shaped SSH control path",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .ssh
+            .as_ref()
             .is_some_and(|ssh| !valid_ssh_host_alias(&ssh.host_alias))
     }) {
         return Err(ConfigFailure::new(
             "user configuration contains an invalid SSH host alias",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .ssh
+            .as_ref()
+            .and_then(|ssh| ssh.control_path.as_deref())
+            .is_some_and(|path| !valid_ssh_control_path(path))
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid SSH control path",
         ));
     }
     if config.contexts.values().any(|context| {

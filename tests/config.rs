@@ -90,7 +90,8 @@ fn ssh_only_context_resolves_user_owned_intent_metadata() {
                   description = \"Fictional Empire AI project\"\n\
                   [contexts.empire.providers.ssh]\n\
                   host_alias = \"empire-alpha\"\n\
-                  expected_remote_principal = \"researcher@example.invalid\"\n";
+                  expected_remote_principal = \"researcher@example.invalid\"\n\
+                  control_path = \"/home/researcher/.ssh/controlmasters/empire-alpha.sock\"\n";
 
     let config = UserConfig::parse(source).expect("SSH intent metadata is valid");
     let definition = config
@@ -108,6 +109,12 @@ fn ssh_only_context_resolves_user_owned_intent_metadata() {
     assert_eq!(
         ssh.expected_remote_principal(),
         "researcher@example.invalid"
+    );
+    assert_eq!(
+        ssh.control_path(),
+        Some(Path::new(
+            "/home/researcher/.ssh/controlmasters/empire-alpha.sock"
+        ))
     );
 }
 
@@ -148,6 +155,50 @@ fn secret_shaped_ssh_expected_identity_is_rejected_without_echoing_it() {
     assert_eq!(
         diagnostic,
         "user configuration contains a secret-shaped value where a provider profile was expected"
+    );
+    assert!(!diagnostic.contains(seeded_secret));
+}
+
+#[test]
+fn relative_ssh_control_path_is_rejected_without_echoing_it() {
+    let seeded_path = "../fictional-sensitive/control.sock";
+    let source = format!(
+        "version = 1\n\
+         [contexts.empire.providers.ssh]\n\
+         host_alias = \"empire-alpha\"\n\
+         expected_remote_principal = \"researcher@example.invalid\"\n\
+         control_path = \"{seeded_path}\"\n"
+    );
+
+    let failure =
+        UserConfig::parse(&source).expect_err("relative SSH control paths must be rejected");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "user configuration contains an invalid SSH control path"
+    );
+    assert!(!diagnostic.contains(seeded_path));
+}
+
+#[test]
+fn secret_shaped_ssh_control_path_is_rejected_without_echoing_it() {
+    let seeded_secret = "ghp_fictional_control_socket";
+    let source = format!(
+        "version = 1\n\
+         [contexts.empire.providers.ssh]\n\
+         host_alias = \"empire-alpha\"\n\
+         expected_remote_principal = \"researcher@example.invalid\"\n\
+         control_path = \"/home/researcher/.ssh/{seeded_secret}\"\n"
+    );
+
+    let failure =
+        UserConfig::parse(&source).expect_err("secret-shaped control paths must be rejected");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "user configuration contains a secret-shaped SSH control path"
     );
     assert!(!diagnostic.contains(seeded_secret));
 }

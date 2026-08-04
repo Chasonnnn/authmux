@@ -8,6 +8,8 @@ mod domain;
 #[cfg(unix)]
 mod gcp_exec;
 #[cfg(unix)]
+mod gcp_login;
+#[cfg(unix)]
 mod gcp_status;
 mod presentation;
 mod process_runner;
@@ -34,6 +36,8 @@ pub use domain::{
 };
 #[cfg(unix)]
 pub use gcp_exec::{GcpExecutionFailure, GcpExecutionGuard};
+#[cfg(unix)]
+pub use gcp_login::{GcpLoginFailure, GcpLoginPlan};
 #[cfg(unix)]
 pub use gcp_status::{GcpCredentialPlane, GcpLocalStatus, GcpPlaneObservation, GcpProjectMatch};
 pub use presentation::{ContextListReport, DoctorReport, PresentationFailure, StatusReport};

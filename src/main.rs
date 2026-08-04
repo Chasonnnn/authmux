@@ -15,8 +15,8 @@ use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
     ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
     ExecutionSelection, GcpDoctor, GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus,
-    ProcessRunner, ProjectBinding, SecureProcessRunner, SshDoctor, SshTransportStatus,
-    StatusEngine, StatusReport, UserConfig,
+    GcpLoginPlan, ProcessRunner, ProjectBinding, SecureProcessRunner, SshDoctor,
+    SshTransportStatus, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -85,9 +85,80 @@ fn login(selection: ContextSelection, provider: Option<ProviderSelection>) -> i3
             2
         }
         ProviderSelection::Ssh => login_ssh(&definition),
-        ProviderSelection::Gcp => {
-            eprintln!("GCP login is not implemented");
-            2
+        ProviderSelection::Gcp => login_gcp(&definition),
+    }
+}
+
+fn login_gcp(definition: &ContextDefinition) -> i32 {
+    let Some(profile) = definition.gcp() else {
+        eprintln!("GCP Provider Profile is not configured");
+        return 2;
+    };
+    let plan = match GcpLoginPlan::new(profile) {
+        Ok(plan) => plan,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return failure.exit_code();
+        }
+    };
+
+    println!("login: {}", definition.name());
+    println!("provider: gcp");
+    println!("credential plane: gcloud_cli");
+    println!("gcloud configuration: {}", plan.configuration());
+    println!("expected gcloud identity: {}", plan.expected_identity());
+    println!("login account: {}", plan.login_account());
+    println!(
+        "native command: gcloud auth login {} --brief --force",
+        plan.login_account()
+    );
+    if let Err(error) = std::io::stdout().flush() {
+        eprintln!("could not display GCP login preview ({})", error.kind());
+        return 5;
+    }
+
+    let Ok((current_config, _)) = load_user_config() else {
+        eprintln!("refusing GCP login: authentication context could not be re-resolved");
+        return 6;
+    };
+    let Ok(current_definition) = current_config.resolve_context_definition(definition.name())
+    else {
+        eprintln!("refusing GCP login: authentication context could not be re-resolved");
+        return 6;
+    };
+    if let Err(failure) = GcpLoginPlan::ensure_unchanged(definition, &current_definition) {
+        eprintln!("{failure}");
+        return failure.exit_code();
+    }
+
+    let runner = match SecureProcessRunner::for_authmux() {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    match runner.run(plan.command(), plan.selection()) {
+        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
+            (Some(0), None) => {
+                println!(
+                    "result: native GCP login command exited successfully; live session usability remains unverified"
+                );
+                0
+            }
+            (Some(code), None) => {
+                eprintln!("native GCP login command exited with status {code}");
+                code
+            }
+            (None, Some(signal)) => terminate_with_signal(signal),
+            _ => {
+                eprintln!("native GCP login command ended without an exit code or signal");
+                5
+            }
+        },
+        Err(failure) => {
+            eprintln!("{failure}");
+            exit_code(&failure)
         }
     }
 }
@@ -626,14 +697,21 @@ fn resolve_login_provider(
         });
     }
 
-    match (definition.aws().is_some(), definition.ssh().is_some()) {
-        (true, false) => Ok(ProviderSelection::Aws),
-        (false, true) => Ok(ProviderSelection::Ssh),
-        (true, true) => Err(
+    let configured = [
+        definition.aws().is_some().then_some(ProviderSelection::Aws),
+        definition.ssh().is_some().then_some(ProviderSelection::Ssh),
+        definition.gcp().is_some().then_some(ProviderSelection::Gcp),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    match configured.as_slice() {
+        [provider] => Ok(*provider),
+        [] => Err("authentication context does not define a provider".to_owned()),
+        _ => Err(
             "login requires --provider when the authentication context defines multiple providers"
                 .to_owned(),
         ),
-        (false, false) => Err("authentication context does not define a provider".to_owned()),
     }
 }
 
@@ -849,7 +927,7 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
 fn parse_login(
     arguments: &[OsString],
 ) -> Result<(ContextSelection, Option<ProviderSelection>), String> {
-    const USAGE: &str = "usage: authmux login <context> [--provider <aws|ssh>]";
+    const USAGE: &str = "usage: authmux login <context> [--provider <aws|gcp|ssh>]";
     let context_name = arguments
         .get(1)
         .and_then(|argument| argument.to_str())
@@ -862,6 +940,7 @@ fn parse_login(
         4 if arguments.get(2).and_then(|argument| argument.to_str()) == Some("--provider") => {
             match arguments.get(3).and_then(|argument| argument.to_str()) {
                 Some("aws") => Some(ProviderSelection::Aws),
+                Some("gcp") => Some(ProviderSelection::Gcp),
                 Some("ssh") => Some(ProviderSelection::Ssh),
                 _ => return Err(USAGE.to_owned()),
             }

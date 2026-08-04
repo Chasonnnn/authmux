@@ -74,8 +74,12 @@ command. A repository binding may select only a user-defined context; it cannot
 override providers or commands, is never discovered above the nearest `.git`
 root, and reports its canonical source path through the Config Module. A
 matching child preserves its exit code or terminating Unix signal. Google
-Cloud `status`, `doctor`, and process-selector construction are implemented;
-GCP `exec` and `login` remain planned work. The AWS `exec` preflight uses
+Cloud `status`, `doctor`, and guarded `exec` are implemented. A native gcloud
+child requires matching protected gcloud identity and project metadata; every
+other GCP child requires a protected, explicitly declared ADC credential-file
+plane. GCP execution does not claim live credential usability before spawn,
+and mixed-provider execution remains unsupported. GCP `login` remains planned
+work. The AWS `exec` preflight uses
 normal AWS CLI credential resolution, which may update AWS-owned caches under
 its documented behavior; authmux does not request login or capture the
 resulting Credential.
@@ -114,6 +118,21 @@ cargo test --test live_gcp -- --ignored --exact \
 
 It verifies independent selection observations and doctor checks without
 claiming credential usability, refresh, authorization, or expiry.
+
+The separate opt-in execution gate contacts Google Cloud and may let gcloud
+refresh or update its native caches:
+
+```console
+AUTHMUX_LIVE_GCP_CONTEXT=crm \
+AUTHMUX_LIVE_GCP_EXPECTED_PROJECT=fictional-project \
+AUTHMUX_LIVE_GCP_ACKNOWLEDGE_CACHE_WRITES=1 \
+cargo test --test live_gcp -- --ignored --exact \
+  configured_gcp_context_completes_the_live_exec_workflow
+```
+
+It runs `gcloud projects describe` through authmux and checks only the expected
+project identifier. Provider failure output is intentionally omitted by the
+test.
 
 Empire AI work begins with an OpenSSH client readiness check that does not read
 SSH configuration, inspect an agent, resolve or contact a host, or trigger MFA.
@@ -191,6 +210,7 @@ Start here:
 - [ADR 0001](docs/adr/0001-delegate-credential-custody.md) — credential-custody decision
 - [ADR 0002](docs/adr/0002-separate-status-from-execution-preflight.md) — read-only status boundary
 - [ADR 0006](docs/adr/0006-observe-gcp-selection-without-running-gcloud.md) — zero-write GCP observation boundary
+- [ADR 0007](docs/adr/0007-guard-gcp-exec-with-local-selection.md) — guarded GCP execution boundary
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

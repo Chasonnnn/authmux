@@ -386,6 +386,10 @@ Exit criteria:
 Deliverables:
 
 - [ ] Generalize `exec` from the proven AWS slice to multiple Provider Profiles.
+- [x] Add guarded GCP-only execution with command-sensitive gcloud and ADC
+  plane requirements, material pre-spawn re-resolution, sanitized failures,
+  and child exit/signal parity. Keep live usability delegated to the explicit
+  child and reject mixed-provider composition under ADR 0007.
 - [x] Define and test the environment inheritance allowlist.
 - [x] Re-resolve the context immediately before process spawn and fail closed
   if the Project Binding, Provider Profile, or Expected Identity changed.

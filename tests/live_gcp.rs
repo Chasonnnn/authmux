@@ -46,6 +46,41 @@ fn configured_gcp_context_completes_the_live_local_workflow() {
     assert_ne!(document["result"], "fail");
 }
 
+#[test]
+#[ignore = "contacts Google Cloud and may refresh or update provider-owned gcloud caches"]
+fn configured_gcp_context_completes_the_live_exec_workflow() {
+    let context = required_environment("AUTHMUX_LIVE_GCP_CONTEXT");
+    let project = required_environment("AUTHMUX_LIVE_GCP_EXPECTED_PROJECT");
+    assert_eq!(
+        required_environment("AUTHMUX_LIVE_GCP_ACKNOWLEDGE_CACHE_WRITES"),
+        "1",
+        "live GCP exec requires explicit cache-write acknowledgement"
+    );
+
+    let output = run_authmux(&[
+        OsString::from("exec"),
+        OsString::from("--context"),
+        context,
+        OsString::from("--"),
+        OsString::from("gcloud"),
+        OsString::from("projects"),
+        OsString::from("describe"),
+        project.clone(),
+        OsString::from("--format=value(projectId)"),
+        OsString::from("--quiet"),
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "live GCP exec failed; provider output intentionally omitted"
+    );
+    let expected = [project.as_encoded_bytes(), b"\n"].concat();
+    assert!(
+        output.stdout == expected,
+        "live GCP exec returned an unexpected project; provider output intentionally omitted"
+    );
+}
+
 fn required_environment(name: &str) -> OsString {
     std::env::var_os(name).unwrap_or_else(|| panic!("{name} must be set for the live GCP gate"))
 }

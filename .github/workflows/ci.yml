@@ -27,7 +27,7 @@ jobs:
           - os: ubuntu-24.04
             mise_sha256: f93483d0e7e0ad6296a5fb2600188d1dadd2c48a4d295af31b69f636a51b92e4
           - os: macos-15
-            mise_sha256: b50951200fb755b1ecf193347fd40ac77020eff4556060972d9a84b8a4ea7c23
+            mise_sha256: 2804fae60faa9900f8397bce231498f09a0ace1b227cf06e851431dbbeff16a8
 
     steps:
       - name: Check out repository

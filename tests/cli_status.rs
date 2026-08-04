@@ -250,6 +250,183 @@ fn ssh_status_reports_an_absent_control_socket_as_inactive() {
 }
 
 #[test]
+fn required_ssh_transport_exits_nonzero_with_the_exact_reauthentication_action_when_inactive() {
+    let fixture = FixtureDirectory::new("status-ssh-required-inactive");
+    let ssh_home = SshHomeFixture::new("required-inactive");
+    let control_path = ssh_home.control_path();
+    let bin_directory = ssh_home.configure_ssh(97);
+    let config_directory = fixture.path.join("config").join("authmux");
+    fs::create_dir_all(&config_directory).expect("config directory is created");
+    fs::write(
+        config_directory.join("config.toml"),
+        format!(
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"\n",
+            control_path.display()
+        ),
+    )
+    .expect("fictional SSH user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "status",
+            "--context",
+            "empire",
+            "--provider",
+            "ssh",
+            "--require-active-transport",
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("HOME", ssh_home.home())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    assert!(stdout.contains("transport reuse: inactive\n"));
+    assert_eq!(
+        stderr,
+        "SSH transport preflight failed: reusable transport is inactive; run `authmux login empire --provider ssh`\n"
+    );
+}
+
+#[test]
+fn required_ssh_transport_succeeds_only_when_the_controlmaster_is_active() {
+    let fixture = FixtureDirectory::new("status-ssh-required-active");
+    let ssh_home = SshHomeFixture::new("required-active");
+    let control_path = ssh_home.control_path();
+    let _listener = UnixListener::bind(&control_path).expect("fixture control socket is created");
+    let mut socket_permissions = fs::metadata(&control_path)
+        .expect("control socket metadata is readable")
+        .permissions();
+    socket_permissions.set_mode(0o600);
+    fs::set_permissions(&control_path, socket_permissions)
+        .expect("control socket permissions are set");
+    let bin_directory = ssh_home.configure_ssh(0);
+    let config_directory = fixture.path.join("config").join("authmux");
+    fs::create_dir_all(&config_directory).expect("config directory is created");
+    fs::write(
+        config_directory.join("config.toml"),
+        format!(
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"\n",
+            control_path.display()
+        ),
+    )
+    .expect("fictional SSH user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "status",
+            "--context",
+            "empire",
+            "--provider",
+            "ssh",
+            "--require-active-transport",
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("HOME", ssh_home.home())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("transport reuse: active\n"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn required_ssh_transport_fails_closed_when_the_socket_cannot_be_verified() {
+    let fixture = FixtureDirectory::new("status-ssh-required-unknown");
+    let ssh_home = SshHomeFixture::new("required-unknown");
+    let control_path = ssh_home.control_path();
+    let _listener = UnixListener::bind(&control_path).expect("fixture control socket is created");
+    let mut socket_permissions = fs::metadata(&control_path)
+        .expect("control socket metadata is readable")
+        .permissions();
+    socket_permissions.set_mode(0o600);
+    fs::set_permissions(&control_path, socket_permissions)
+        .expect("control socket permissions are set");
+    let bin_directory = ssh_home.configure_ssh(97);
+    let config_directory = fixture.path.join("config").join("authmux");
+    fs::create_dir_all(&config_directory).expect("config directory is created");
+    fs::write(
+        config_directory.join("config.toml"),
+        format!(
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"\n",
+            control_path.display()
+        ),
+    )
+    .expect("fictional SSH user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "status",
+            "--context",
+            "empire",
+            "--provider",
+            "ssh",
+            "--require-active-transport",
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("HOME", ssh_home.home())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(5), "stderr: {stderr}");
+    assert!(stdout.contains("transport reuse: unknown\n"));
+    assert_eq!(
+        stderr,
+        "SSH transport preflight failed: reusable transport could not be verified; run `authmux login empire --provider ssh`\n"
+    );
+}
+
+#[test]
+fn active_transport_requirement_rejects_non_ssh_providers_without_probing_them() {
+    let fixture = FixtureDirectory::new("status-required-aws");
+    let (bin_directory, sts_marker) = fixture.configure(Some("111111111111"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "status",
+            "--context",
+            "crm",
+            "--provider",
+            "aws",
+            "--require-active-transport",
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("diagnostic is UTF-8"),
+        "--require-active-transport requires an SSH Provider Profile\n"
+    );
+    assert!(!sts_marker.exists(), "rejected preflight must not call STS");
+}
+
+#[test]
 fn mixed_provider_status_requires_an_explicit_provider_before_any_probe() {
     let fixture = FixtureDirectory::new("status-mixed-provider");
     let (bin_directory, provider_marker) = fixture.configure(Some("111111111111"));

@@ -222,6 +222,19 @@ control socket and reports Transport Reuse as `active`, `inactive`, or
 Cloud selection declares each Credential Plane explicitly; paths are validated
 but never printed by status reports:
 
+Agents can fail closed before submitting Empire AI work without starting SSH
+or triggering MFA:
+
+```console
+authmux status --context empire --provider ssh --require-active-transport
+```
+
+This exits `0` only when the protected local ControlMaster is active. An
+inactive result exits `1` and instructs the user to run
+`authmux login empire --provider ssh`; an unverifiable socket also exits
+nonzero. After a successful preflight, agents continue to use native
+`ssh empire`, `scp`, and `rsync`.
+
 ```toml
 [contexts.crm.providers.gcp.gcloud]
 config_dir = "/home/researcher/.config/gcloud"

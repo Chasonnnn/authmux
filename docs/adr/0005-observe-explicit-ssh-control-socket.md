@@ -58,6 +58,19 @@ The normalized status keeps these axes separate:
 No expiration is reported. `ControlPersist` is an idle policy, not a
 provider-reported remaining lifetime.
 
+Callers that require a reusable transport before starting native SSH work may
+opt into a machine-facing exit contract:
+
+```console
+authmux status --context empire --provider ssh --require-active-transport
+```
+
+The command still emits the ordinary sanitized status report. It exits `0`
+only for `active`, exits `1` for `inactive` with the explicit native login
+action, and fails closed for `unknown`. The requirement is rejected for non-SSH
+providers before a status probe. Ordinary status retains its data-reporting
+exit behavior.
+
 This decision narrowly supersedes ADR 0004's prohibition on `ssh -O`: only the
 fixed, local, output-discarding `check` command above is permitted from
 `status`. All other connection management remains delegated to OpenSSH.
@@ -66,8 +79,10 @@ fixed, local, output-discarding `check` command above is permitted from
 
 Agents can ask authmux whether a reusable local transport is present without
 triggering MFA, evaluating arbitrary SSH configuration, or contacting Empire
-AI. An active result does not prove remote authorization or identity and may
-become stale immediately after observation.
+AI. They can use the required-transport form as a submission preflight and
+continue to use native `ssh empire` only after it exits successfully. An active
+result does not prove remote authorization or identity and may become stale
+immediately after observation.
 
 Generic `authmux exec` remains unsupported for SSH. It represents local
 process-scoped provider selection, while SSH remote commands have different

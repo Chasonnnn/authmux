@@ -33,7 +33,8 @@ fn run() -> i32 {
             selection,
             provider,
             format,
-        }) => show_status(selection, provider, format),
+            require_active_transport,
+        }) => show_status(selection, provider, format, require_active_transport),
         Ok(CliCommand::Login {
             selection,
             provider,
@@ -567,6 +568,7 @@ fn show_status(
     selection: ContextSelection,
     provider: Option<ProviderSelection>,
     format: ReportFormat,
+    require_active_transport: bool,
 ) -> i32 {
     let selection = match resolve_selection(selection) {
         Ok(selection) => selection,
@@ -596,12 +598,17 @@ fn show_status(
             return 2;
         }
     };
+    if require_active_transport && provider != ProviderSelection::Ssh {
+        eprintln!("--require-active-transport requires an SSH Provider Profile");
+        return 2;
+    }
     let report = match provider {
-        ProviderSelection::Aws => aws_status_report(&definition),
-        ProviderSelection::Ssh => ssh_status_report(&definition),
-        ProviderSelection::Gcp => gcp_status_report(&definition),
+        ProviderSelection::Aws => aws_status_report(&definition).map(|report| (report, None)),
+        ProviderSelection::Ssh => ssh_status_report(&definition)
+            .map(|(report, transport_reuse)| (report, Some(transport_reuse))),
+        ProviderSelection::Gcp => gcp_status_report(&definition).map(|report| (report, None)),
     };
-    let report = match report {
+    let (report, transport_reuse) = match report {
         Ok(report) => report,
         Err(exit_code) => return exit_code,
     };
@@ -616,6 +623,9 @@ fn show_status(
         },
     };
     print!("{rendered}");
+    if require_active_transport {
+        return require_active_ssh_transport(&selection.context_name, transport_reuse);
+    }
     0
 }
 
@@ -639,16 +649,21 @@ fn aws_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32
     })
 }
 
-fn ssh_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32> {
+fn ssh_status_report(
+    definition: &ContextDefinition,
+) -> Result<(StatusReport, SshTransportReuse), i32> {
     let Some(profile) = definition.ssh() else {
         eprintln!("SSH Provider Profile is not configured");
         return Err(2);
     };
     let observation = observe_ssh_transport(definition)?;
-    StatusReport::local_ssh(definition.name(), profile, &observation).map_err(|failure| {
-        eprintln!("could not render status: {failure}");
-        5
-    })
+    let transport_reuse = observation.transport_reuse();
+    let report =
+        StatusReport::local_ssh(definition.name(), profile, &observation).map_err(|failure| {
+            eprintln!("could not render status: {failure}");
+            5
+        })?;
+    Ok((report, transport_reuse))
 }
 
 fn observe_ssh_transport(definition: &ContextDefinition) -> Result<SshTransportObservation, i32> {
@@ -676,6 +691,27 @@ fn ssh_transport_reuse_label(transport_reuse: SshTransportReuse) -> &'static str
         SshTransportReuse::Active => "active",
         SshTransportReuse::Inactive => "inactive",
         SshTransportReuse::Unknown => "unknown",
+    }
+}
+
+fn require_active_ssh_transport(
+    context_name: &str,
+    transport_reuse: Option<SshTransportReuse>,
+) -> i32 {
+    match transport_reuse {
+        Some(SshTransportReuse::Active) => 0,
+        Some(SshTransportReuse::Inactive) => {
+            eprintln!(
+                "SSH transport preflight failed: reusable transport is inactive; run `authmux login {context_name} --provider ssh`"
+            );
+            1
+        }
+        Some(SshTransportReuse::Unknown) | None => {
+            eprintln!(
+                "SSH transport preflight failed: reusable transport could not be verified; run `authmux login {context_name} --provider ssh`"
+            );
+            5
+        }
     }
 }
 
@@ -987,6 +1023,7 @@ enum CliCommand {
         selection: ContextSelection,
         provider: Option<ProviderSelection>,
         format: ReportFormat,
+        require_active_transport: bool,
     },
     Login {
         selection: ContextSelection,
@@ -1042,13 +1079,14 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
         Some("exec") => parse_exec(arguments)
             .map(|(selection, command)| CliCommand::Exec { selection, command }),
         Some("context") => parse_context_command(&arguments),
-        Some("status") => {
-            parse_status(&arguments).map(|(selection, provider, format)| CliCommand::Status {
+        Some("status") => parse_status(&arguments).map(
+            |(selection, provider, format, require_active_transport)| CliCommand::Status {
                 selection,
                 provider,
                 format,
-            })
-        }
+                require_active_transport,
+            },
+        ),
         Some("login") => parse_login(&arguments).map(|(selection, provider)| CliCommand::Login {
             selection,
             provider,
@@ -1169,12 +1207,20 @@ fn parse_context_list(arguments: &[OsString]) -> Result<ReportFormat, String> {
 
 fn parse_status(
     arguments: &[OsString],
-) -> Result<(ContextSelection, Option<ProviderSelection>, ReportFormat), String> {
-    const USAGE: &str =
-        "usage: authmux status [--context <context>] [--provider <aws|gcp|ssh>] [--json]";
+) -> Result<
+    (
+        ContextSelection,
+        Option<ProviderSelection>,
+        ReportFormat,
+        bool,
+    ),
+    String,
+> {
+    const USAGE: &str = "usage: authmux status [--context <context>] [--provider <aws|gcp|ssh>] [--json] [--require-active-transport]";
     let mut selection = None;
     let mut provider = None;
     let mut format = ReportFormat::Human;
+    let mut require_active_transport = false;
     let mut index = 1;
     while index < arguments.len() {
         match arguments.get(index).and_then(|argument| argument.to_str()) {
@@ -1203,6 +1249,10 @@ fn parse_status(
                 };
                 index += 2;
             }
+            Some("--require-active-transport") if !require_active_transport => {
+                require_active_transport = true;
+                index += 1;
+            }
             _ => return Err(USAGE.to_owned()),
         }
     }
@@ -1211,6 +1261,7 @@ fn parse_status(
         selection.unwrap_or(ContextSelection::ProjectBound),
         provider,
         format,
+        require_active_transport,
     ))
 }
 

@@ -117,7 +117,7 @@ or a Credential.
 ## 6. Proposed command contract
 
 ```console
-authmux status [--context NAME] [--provider NAME] [--json]
+authmux status [--context NAME] [--provider NAME] [--json] [--require-active-transport]
 authmux doctor [--context NAME] [--provider NAME] [--json]
 authmux login <context> [--provider NAME]
 authmux exec [--context NAME] -- <program> [args...]
@@ -132,6 +132,8 @@ Behavioral rules:
 - `status` reports observations and exits nonzero only for command/config
   failure. Individual invalid sessions remain data in the report. SSH status
   observes only an explicitly configured local control socket per ADR 0005.
+  The opt-in `--require-active-transport` machine contract exits nonzero unless
+  that SSH transport is active and never contacts the provider.
 - `doctor` checks config, executable discovery, supported CLI versions, and
   only provider observations already proven read-only. AWS and SSH checks do
   not contact their providers. A mixed-provider context requires an explicit
@@ -408,6 +410,8 @@ Deliverables:
 - [x] Add local SSH transport status through an explicit protected control
   socket without evaluating SSH configuration or contacting the provider;
   keep Identity Match unverified and Session Usability indeterminate.
+- [x] Add an opt-in machine-facing SSH transport preflight that exits nonzero
+  for inactive or unverifiable reuse and reports the exact native login action.
 - [x] Delegate explicit SSH login to `ssh HOST_ALIAS` with terminal passthrough,
   filtered environment inheritance, and no capture of MFA input or native
   output; leave `ControlMaster` and `ControlPersist` under user-owned OpenSSH

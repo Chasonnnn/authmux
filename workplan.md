@@ -325,9 +325,9 @@ Deliverables:
 - [ ] Test the GitHub hypothesis of pre-provisioned, user-owned
   `GH_CONFIG_DIR` directories, secure credential-store failure, and Git helper
   behavior without switching a shared active account or extracting a token.
-- [ ] Treat gcloud CLI authentication and ADC as separate evidence surfaces;
-  test selectors across representative client libraries without reading or
-  printing credentials.
+- [x] Treat gcloud CLI authentication and ADC as separate evidence surfaces;
+  run the synthetic command-purity gate without reading or printing
+  credentials; record the failed zero-write result in ADR 0006.
 - [x] Record the user-only two-plane GCP schema, selector policy, prohibited
   operations, and synthetic no-write implementation gate.
 - [x] Limit SSH evidence to local readiness in 0.1; do not infer remote
@@ -389,8 +389,9 @@ Deliverables:
 - [x] Re-resolve the context immediately before process spawn and fail closed
   if the Project Binding, Provider Profile, or Expected Identity changed.
 - [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
-  observations for every declared credential plane. Merge the real adapter
-  only after its disposable, network-denied probe-purity gate passes.
+  observations for every declared credential plane. The disposable,
+  network-denied command-purity gate failed, so ADR 0006 prohibits gcloud
+  subprocesses and credential-database reads from `status` and `doctor`.
 - [x] Add a bounded OpenSSH client readiness Module as the first Empire AI
   local-readiness slice; keep remote identity, MFA, authorization, expiry, and
   execution selection explicitly unsupported.

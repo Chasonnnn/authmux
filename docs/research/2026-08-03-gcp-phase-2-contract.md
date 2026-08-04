@@ -164,6 +164,19 @@ but does not guarantee perpetual zero-write or zero-network behavior. Failure of
 this synthetic purity gate blocks the adapter; it must not be explained away as
 read-only.
 
+### Gate result
+
+The 2026-08-03 gate failed on Google Cloud SDK 576.0.0. With network denied and
+all documented suppression selectors applied, the candidate commands created
+`credentials.db`, `access_tokens.db`, `crm_configs.db`, `gce`, and survey
+metadata inside the disposable `CLOUDSDK_CONFIG`. The fictional named
+configuration remained unchanged and no provider API was contacted.
+
+Accordingly, the proposed command-backed Status Adapter is blocked. ADR 0006
+replaces it with bounded inspection of the single protected named
+configuration properties file plus ADC path metadata. No credential database
+or ADC file is opened.
+
 ## Primary sources
 
 - [Managing gcloud CLI configurations](https://docs.cloud.google.com/sdk/docs/configurations)

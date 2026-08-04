@@ -105,6 +105,28 @@ fn rejected_control_check_output_becomes_unknown_without_retaining_native_text()
     assert!(!format!("{observation:?}").contains("ghp_fictional_sensitive_output"));
 }
 
+#[test]
+fn permissive_control_socket_is_unknown_without_invoking_a_session_claim() {
+    let fixture = StatusFixture::new("permissive");
+    let ssh_directory = fixture.ssh_directory();
+    let control_path = ssh_directory.join("empire.sock");
+    let _listener = UnixListener::bind(&control_path).expect("fixture control socket is created");
+    set_mode(&control_path, 0o666);
+    let profile = StatusFixture::profile(&control_path);
+    let status = SshTransportStatus::new(
+        ControlCheckFixture {
+            output: ProbeOutput::exited(0, b"unused", b""),
+        },
+        &ssh_directory,
+    );
+
+    let observation = status
+        .observe(&profile)
+        .expect("an insecure local socket remains sanitized status data");
+
+    assert_eq!(observation.transport_reuse(), SshTransportReuse::Unknown);
+}
+
 struct StatusFixture {
     path: PathBuf,
 }

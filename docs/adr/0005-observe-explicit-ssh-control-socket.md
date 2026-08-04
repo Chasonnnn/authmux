@@ -29,9 +29,9 @@ Source: [OpenSSH client manual](https://man.openbsd.org/ssh)
 An SSH Provider Profile may declare an absolute, non-secret `control_path` in
 the user-owned authmux configuration. The production status adapter accepts
 the path only when it is lexically below the current user's `.ssh` directory.
-It rejects parent traversal and treats symlinks, non-sockets, insecure parent
-directories, ownership mismatches, and inspection failures as unknown local
-evidence.
+It rejects parent traversal and treats symlinks, non-sockets, permissive socket
+permissions, insecure parent directories, ownership mismatches, and inspection
+failures as unknown local evidence.
 
 When the path is absent, authmux reports transport reuse as `inactive` without
 starting OpenSSH. When a protected user-owned Unix socket exists, authmux runs

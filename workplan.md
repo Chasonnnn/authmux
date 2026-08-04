@@ -397,9 +397,9 @@ Deliverables:
 - [x] Add user-owned Empire AI host alias and Expected Identity configuration
   with provider-free context inspection.
 - [x] Expose OpenSSH readiness through provider-scoped `doctor` without
-  evaluating SSH configuration or contacting the cluster; keep `status` and
-  `exec` unsupported until stronger evidence and a safe Execution Scope exist.
-- [ ] Add local SSH transport status through an explicit protected control
+  evaluating SSH configuration or contacting the cluster; keep `exec`
+  unsupported until stronger remote evidence and a safe Execution Scope exist.
+- [x] Add local SSH transport status through an explicit protected control
   socket without evaluating SSH configuration or contacting the provider;
   keep Identity Match unverified and Session Usability indeterminate.
 - [x] Delegate explicit SSH login to `ssh HOST_ALIAS` with terminal passthrough,

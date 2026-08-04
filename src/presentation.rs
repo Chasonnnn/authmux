@@ -8,8 +8,10 @@ use crate::{
     AuthenticationContext, ContextDefinition, DoctorOutcome, DoctorResult, EvidenceLevel,
     IdentityMatch, ObservationReason, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
+#[cfg(unix)]
+use crate::{SshProviderDefinition, SshTransportObservation, SshTransportReuse};
 
-const STATUS_SCHEMA_VERSION: u32 = 1;
+const STATUS_SCHEMA_VERSION: u32 = 2;
 const CONTEXT_LIST_SCHEMA_VERSION: u32 = 1;
 const DOCTOR_SCHEMA_VERSION: u32 = 1;
 
@@ -87,6 +89,7 @@ struct StatusEntry {
     reauthentication_need: &'static str,
     evidence_level: &'static str,
     provider_contacted: bool,
+    transport_reuse: Option<&'static str>,
     observed_at_unix: u64,
 }
 
@@ -122,6 +125,48 @@ impl StatusReport {
                 reauthentication_need: reauthentication_need(observation.reauthentication_need()),
                 evidence_level: evidence_level(observation.evidence_level()),
                 provider_contacted: false,
+                transport_reuse: None,
+                observed_at_unix,
+            },
+        })
+    }
+
+    /// Builds a presentation-safe report for local SSH transport reuse.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the observation time cannot be represented
+    /// in the versioned output schema.
+    #[cfg(unix)]
+    pub fn local_ssh(
+        context_name: &str,
+        profile: &SshProviderDefinition,
+        observation: &SshTransportObservation,
+    ) -> Result<Self, PresentationFailure> {
+        let observed_at_unix = observation
+            .observed_at()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| PresentationFailure::new("status observation time is invalid"))?
+            .as_secs();
+        let reason = match observation.transport_reuse() {
+            SshTransportReuse::Active | SshTransportReuse::Inactive => "insufficient_evidence",
+            SshTransportReuse::Unknown => "provider_error",
+        };
+
+        Ok(Self {
+            context: context_name.to_owned(),
+            observation: StatusEntry {
+                provider: "ssh",
+                profile: profile.host_alias().to_owned(),
+                expected_identity: profile.expected_remote_principal().to_owned(),
+                observed_identity: None,
+                identity_match: "unverified",
+                session_usability: "indeterminate",
+                reason,
+                reauthentication_need: "unknown",
+                evidence_level: "local_metadata",
+                provider_contacted: observation.provider_contacted(),
+                transport_reuse: Some(ssh_transport_reuse(observation.transport_reuse())),
                 observed_at_unix,
             },
         })
@@ -165,6 +210,10 @@ impl StatusReport {
             }
         )
         .expect("writing to a String cannot fail");
+        if let Some(transport_reuse) = entry.transport_reuse {
+            writeln!(report, "transport reuse: {transport_reuse}")
+                .expect("writing to a String cannot fail");
+        }
         writeln!(report, "observed at unix: {}", entry.observed_at_unix)
             .expect("writing to a String cannot fail");
         report
@@ -416,5 +465,14 @@ const fn doctor_outcome(value: DoctorOutcome) -> &'static str {
         DoctorOutcome::Pass => "pass",
         DoctorOutcome::Warning => "warning",
         DoctorOutcome::Fail => "fail",
+    }
+}
+
+#[cfg(unix)]
+const fn ssh_transport_reuse(value: SshTransportReuse) -> &'static str {
+    match value {
+        SshTransportReuse::Active => "active",
+        SshTransportReuse::Inactive => "inactive",
+        SshTransportReuse::Unknown => "unknown",
     }
 }

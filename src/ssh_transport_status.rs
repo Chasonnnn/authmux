@@ -151,7 +151,11 @@ fn inspect_control_socket(control_path: &Path, ssh_directory: &Path) -> SocketIn
     }
 
     match fs::symlink_metadata(control_path) {
-        Ok(metadata) if metadata.file_type().is_socket() && metadata.uid() == owner => {
+        Ok(metadata)
+            if metadata.file_type().is_socket()
+                && metadata.uid() == owner
+                && metadata.mode().trailing_zeros() >= 6 =>
+        {
             SocketInspection::Ready
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => SocketInspection::Inactive,

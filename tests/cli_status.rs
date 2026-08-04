@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -99,40 +100,187 @@ fn aws_login_session_reports_only_its_account_identity() {
 }
 
 #[test]
-fn ssh_status_fails_closed_without_running_a_provider_probe() {
-    let fixture = FixtureDirectory::new("status-ssh-unsupported");
-    let (bin_directory, provider_marker) = fixture.configure(None);
+fn ssh_status_reports_active_transport_without_identity_or_session_claims() {
+    let fixture = FixtureDirectory::new("status-ssh-active");
+    let ssh_home = SshHomeFixture::new("active");
+    let control_path = ssh_home.control_path();
+    let _listener = UnixListener::bind(&control_path).expect("fixture control socket is created");
+    let mut socket_permissions = fs::metadata(&control_path)
+        .expect("control socket metadata is readable")
+        .permissions();
+    socket_permissions.set_mode(0o600);
+    fs::set_permissions(&control_path, socket_permissions)
+        .expect("control socket permissions are set");
+    let bin_directory = ssh_home.configure_ssh(0);
+    let config_directory = fixture.path.join("config").join("authmux");
+    fs::create_dir_all(&config_directory).expect("config directory is created");
     fs::write(
-        fixture
-            .path
-            .join("config")
-            .join("authmux")
-            .join("config.toml"),
-        "version = 1\n\
-         [contexts.empire.providers.ssh]\n\
-         host_alias = \"empire-alpha\"\n\
-         expected_remote_principal = \"researcher@example.invalid\"\n",
+        config_directory.join("config.toml"),
+        format!(
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"\n",
+            control_path.display()
+        ),
     )
     .expect("fictional SSH user config is written");
 
     let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
-        .args(["status", "--context", "empire"])
+        .args(["status", "--context", "empire", "--provider", "ssh"])
         .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("HOME", ssh_home.home())
         .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
         .output()
         .expect("authmux runs");
 
     let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
-    assert_eq!(output.status.code(), Some(2));
-    assert!(stdout.is_empty());
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
     assert_eq!(
-        stderr,
-        "requested authentication context does not define AWS required by this command\n"
+        normalize_human_observation_time(&stdout),
+        "context: empire\n\
+         provider: ssh\n\
+         profile: empire-alpha\n\
+         expected identity: researcher@example.invalid\n\
+         observed identity: not observed\n\
+         identity match: unverified\n\
+         session usability: indeterminate\n\
+         reason: insufficient_evidence\n\
+         reauthentication need: unknown\n\
+         evidence level: local_metadata\n\
+         provider contacted: no\n\
+         transport reuse: active\n\
+         observed at unix: <observed_at_unix>\n"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn ssh_status_json_reports_transport_separately_from_session_axes() {
+    let fixture = FixtureDirectory::new("status-ssh-json");
+    let ssh_home = SshHomeFixture::new("json");
+    let control_path = ssh_home.control_path();
+    let _listener = UnixListener::bind(&control_path).expect("fixture control socket is created");
+    let mut socket_permissions = fs::metadata(&control_path)
+        .expect("control socket metadata is readable")
+        .permissions();
+    socket_permissions.set_mode(0o600);
+    fs::set_permissions(&control_path, socket_permissions)
+        .expect("control socket permissions are set");
+    let bin_directory = ssh_home.configure_ssh(0);
+    let config_directory = fixture.path.join("config").join("authmux");
+    fs::create_dir_all(&config_directory).expect("config directory is created");
+    fs::write(
+        config_directory.join("config.toml"),
+        format!(
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"\n",
+            control_path.display()
+        ),
+    )
+    .expect("fictional SSH user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "status",
+            "--context",
+            "empire",
+            "--provider",
+            "ssh",
+            "--json",
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("HOME", ssh_home.home())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        normalize_json_observation_time(&stdout),
+        include_str!("fixtures/golden/status-ssh-json.json")
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn ssh_status_reports_an_absent_control_socket_as_inactive() {
+    let fixture = FixtureDirectory::new("status-ssh-inactive");
+    let ssh_home = SshHomeFixture::new("inactive");
+    let control_path = ssh_home.control_path();
+    let bin_directory = ssh_home.configure_ssh(97);
+    let config_directory = fixture.path.join("config").join("authmux");
+    fs::create_dir_all(&config_directory).expect("config directory is created");
+    fs::write(
+        config_directory.join("config.toml"),
+        format!(
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"\n",
+            control_path.display()
+        ),
+    )
+    .expect("fictional SSH user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["status", "--context", "empire"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("HOME", ssh_home.home())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("transport reuse: inactive\n"));
+    assert!(stdout.contains("identity match: unverified\n"));
+    assert!(stdout.contains("session usability: indeterminate\n"));
+    assert!(stdout.contains("provider contacted: no\n"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn mixed_provider_status_requires_an_explicit_provider_before_any_probe() {
+    let fixture = FixtureDirectory::new("status-mixed-provider");
+    let (bin_directory, provider_marker) = fixture.configure(Some("111111111111"));
+    fs::write(
+        fixture.path.join("config/authmux/config.toml"),
+        "version = 1\n\
+         [contexts.crm.providers.aws]\n\
+         profile = \"crm-development\"\n\
+         expected_account = \"111111111111\"\n\
+         [contexts.crm.providers.ssh]\n\
+         host_alias = \"empire-alpha\"\n\
+         expected_remote_principal = \"researcher@example.invalid\"\n",
+    )
+    .expect("mixed-provider user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["status", "--context", "crm"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("diagnostic is UTF-8"),
+        "status requires --provider when the authentication context defines multiple providers\n"
     );
     assert!(
         !provider_marker.exists(),
-        "SSH status must not run a provider"
+        "status must not probe a provider"
     );
 }
 
@@ -185,6 +333,58 @@ fn malformed_local_metadata_is_not_exposed_by_json() {
 
 struct FixtureDirectory {
     path: PathBuf,
+}
+
+struct SshHomeFixture {
+    path: PathBuf,
+}
+
+impl SshHomeFixture {
+    fn new(label: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock is after the Unix epoch")
+            .as_nanos()
+            % 1_000_000_000;
+        let path = PathBuf::from("/private/tmp")
+            .join(format!("amux-cs-{label}-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(path.join("home/.ssh")).expect("SSH fixture directory is created");
+        let mut permissions = fs::metadata(path.join("home/.ssh"))
+            .expect("SSH directory metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(path.join("home/.ssh"), permissions)
+            .expect("SSH directory permissions are set");
+        Self { path }
+    }
+
+    fn home(&self) -> PathBuf {
+        self.path.join("home")
+    }
+
+    fn control_path(&self) -> PathBuf {
+        self.path.join("home/.ssh/empire.sock")
+    }
+
+    fn configure_ssh(&self, exit_code: i32) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        fs::create_dir(&bin_directory).expect("SSH fixture bin directory is created");
+        let ssh = bin_directory.join("ssh");
+        fs::write(&ssh, format!("#!/bin/sh\nexit {exit_code}\n"))
+            .expect("fictional ssh is written");
+        let mut permissions = fs::metadata(&ssh)
+            .expect("fictional ssh metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&ssh, permissions).expect("fictional ssh is executable");
+        bin_directory
+    }
+}
+
+impl Drop for SshHomeFixture {
+    fn drop(&mut self) {
+        remove_fixture(&self.path);
+    }
 }
 
 impl FixtureDirectory {

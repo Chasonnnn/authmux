@@ -1,20 +1,20 @@
 {
   "schema_version": 2,
   "command": "status",
-  "context": "crm",
+  "context": "empire",
   "observations": [
     {
-      "provider": "aws",
-      "profile": "crm-development",
-      "expected_identity": "111111111111",
-      "observed_identity": "111111111111",
-      "identity_match": "match",
+      "provider": "ssh",
+      "profile": "empire-alpha",
+      "expected_identity": "researcher@example.invalid",
+      "observed_identity": null,
+      "identity_match": "unverified",
       "session_usability": "indeterminate",
       "reason": "insufficient_evidence",
       "reauthentication_need": "unknown",
       "evidence_level": "local_metadata",
       "provider_contacted": false,
-      "transport_reuse": null,
+      "transport_reuse": "active",
       "observed_at_unix": 0
     }
   ]

@@ -117,7 +117,7 @@ or a Credential.
 ## 6. Proposed command contract
 
 ```console
-authmux status [--context NAME] [--json]
+authmux status [--context NAME] [--provider NAME] [--json]
 authmux doctor [--context NAME] [--provider NAME] [--json]
 authmux login <context> [--provider NAME]
 authmux exec [--context NAME] -- <program> [args...]
@@ -130,7 +130,8 @@ Behavioral rules:
 - Repository binding is used when `--context` is omitted; ambiguity is an
   error, not an interactive guess.
 - `status` reports observations and exits nonzero only for command/config
-  failure. Individual invalid sessions remain data in the report.
+  failure. Individual invalid sessions remain data in the report. SSH status
+  observes only an explicitly configured local control socket per ADR 0005.
 - `doctor` checks config, executable discovery, supported CLI versions, and
   only provider observations already proven read-only. AWS and SSH checks do
   not contact their providers. A mixed-provider context requires an explicit
@@ -162,6 +163,7 @@ expected_account = "123456789012"
 [contexts.empire.providers.ssh]
 host_alias = "empire-alpha"
 expected_remote_principal = "researcher@example.invalid"
+control_path = "/home/researcher/.ssh/controlmasters/empire-alpha.sock"
 
 [contexts.crm.providers.gcp.gcloud]
 config_dir = "/absolute/user-owned/gcloud-config-root"
@@ -397,6 +399,9 @@ Deliverables:
 - [x] Expose OpenSSH readiness through provider-scoped `doctor` without
   evaluating SSH configuration or contacting the cluster; keep `status` and
   `exec` unsupported until stronger evidence and a safe Execution Scope exist.
+- [ ] Add local SSH transport status through an explicit protected control
+  socket without evaluating SSH configuration or contacting the provider;
+  keep Identity Match unverified and Session Usability indeterminate.
 - [x] Delegate explicit SSH login to `ssh HOST_ALIAS` with terminal passthrough,
   filtered environment inheritance, and no capture of MFA input or native
   output; leave `ControlMaster` and `ControlPersist` under user-owned OpenSSH

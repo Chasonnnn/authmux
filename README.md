@@ -95,6 +95,18 @@ cause the AWS CLI to refresh provider-owned SSO or login caches during the STS
 preflight, and removes its temporary authmux configuration. Captured provider
 output is not printed by the test.
 
+Empire AI work begins with an OpenSSH client readiness check that does not read
+SSH configuration, inspect an agent, resolve or contact a host, or trigger MFA.
+Run its opt-in local gate with:
+
+```console
+cargo test --test live_ssh -- --ignored --exact \
+  installed_openssh_client_passes_the_local_readiness_gate
+```
+
+This proves only that a supported OpenSSH client is installed. Remote identity,
+authorization, MFA state, Session Usability, and expiry remain unobserved.
+
 The user configuration remains at
 `$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`. The
 optional root binding contains only:

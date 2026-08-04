@@ -124,6 +124,26 @@ cause the AWS CLI to refresh provider-owned SSO or login caches during the STS
 preflight, and removes its temporary authmux configuration. Captured provider
 output is not printed by the test.
 
+The interactive recovery gate logs in the first profile, then independently
+validates two process-scoped profiles through local status and guarded STS
+execution:
+
+```console
+AUTHMUX_LIVE_AWS_PROFILE=research-console \
+AUTHMUX_LIVE_AWS_EXPECTED_ACCOUNT=111111111111 \
+AUTHMUX_LIVE_AWS_SECOND_PROFILE=workload-operator \
+AUTHMUX_LIVE_AWS_SECOND_EXPECTED_ACCOUNT=222222222222 \
+AUTHMUX_LIVE_AWS_ACKNOWLEDGE_LOGIN_MUTATION=1 \
+AUTHMUX_LIVE_AWS_ACKNOWLEDGE_CACHE_WRITES=1 \
+cargo test --test live_aws -- --ignored --exact \
+  configured_aws_login_and_two_profiles_complete_the_live_workflow
+```
+
+The profiles must be distinct, but the gate does not require their Expected
+Identities to differ: a role profile can intentionally resolve within the same
+account. Native login inherits the terminal and may open a browser. The test
+does not capture its authorization URL or input.
+
 The GCP live gate remains local-only and never runs gcloud:
 
 ```console

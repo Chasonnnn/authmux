@@ -211,11 +211,16 @@ description = "Empire AI research"
 [contexts.empire.providers.ssh]
 host_alias = "empire-alpha"
 expected_remote_principal = "researcher@example.invalid"
+control_path = "/home/researcher/.ssh/sockets/empire-alpha.sock"
 ```
 
 `host_alias` names user-owned SSH intent; authmux does not evaluate the SSH
-configuration behind it. Google Cloud selection declares each Credential Plane
-explicitly; paths are validated but never printed by status reports:
+configuration behind it. After `authmux login empire --provider ssh` exits
+successfully, authmux checks only the protected, explicitly declared local
+control socket and reports Transport Reuse as `active`, `inactive`, or
+`unknown`; remote identity and Session Usability remain unverified. Google
+Cloud selection declares each Credential Plane explicitly; paths are validated
+but never printed by status reports:
 
 ```toml
 [contexts.crm.providers.gcp.gcloud]

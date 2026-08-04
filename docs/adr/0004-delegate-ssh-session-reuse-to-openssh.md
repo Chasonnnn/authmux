@@ -37,8 +37,12 @@ Before starting OpenSSH, authmux displays the selected Authentication Context,
 SSH host alias, declared Expected Identity, and literal native command. It then
 spawns `ssh HOST_ALIAS` as an argument vector with the interactive terminal
 attached. Native output and MFA input bypass authmux capture and logging. A
-zero exit from OpenSSH proves only that the native command completed; authmux
-continues to report remote Session Usability as unverified.
+zero exit from OpenSSH proves only that the native command completed. After a
+zero exit, authmux performs ADR 0005's bounded local control-socket observation
+when the SSH Provider Profile declares `control_path`, then displays Transport
+Reuse as `active`, `inactive`, or `unknown`. This post-login observation does
+not contact Empire AI and continues to report remote Session Usability as
+unverified.
 
 User-owned OpenSSH configuration remains authoritative for connection reuse.
 If the selected host alias uses `ControlMaster` and `ControlPersist`, the login
@@ -64,7 +68,8 @@ authmux does not:
 
 Existing OpenSSH multiplexing works through authmux without duplicating SSH
 configuration or credential custody. The explicit terminal handoff also gives
-the user one place to select and preview the intended context before MFA.
+the user one place to select and preview the intended context before MFA, then
+reports whether the expected local reusable transport was established.
 
 Longer reuse increases the time during which a process with access to the
 user's protected control socket can open another channel. It also remains

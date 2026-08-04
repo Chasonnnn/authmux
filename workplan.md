@@ -440,7 +440,8 @@ Deliverables:
 - [x] Preview the affected SSH Provider Profile and native command before
   mutation.
 - [x] Support SSH interactive terminal handoff without capturing secrets.
-- [ ] Re-observe status after successful login and display evidence.
+- [x] Re-observe protected local SSH Transport Reuse after successful native
+  login and display the result without claiming remote Session Usability.
 - [ ] Handle cancellation, timeout, native failure, and partial multi-provider
   completion without silent retry.
 

@@ -16,7 +16,8 @@ use authmux::{
     ContextDefinition, ContextEngine, ContextListReport, DoctorOutcome, DoctorReport,
     ExecutionContextResolver, ExecutionFailure, ExecutionSelection, GcpDoctor, GcpExecutionFailure,
     GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, ProcessRunner, ProjectBinding,
-    SecureProcessRunner, SshDoctor, SshTransportStatus, StatusEngine, StatusReport, UserConfig,
+    SecureProcessRunner, SshDoctor, SshTransportObservation, SshTransportReuse, SshTransportStatus,
+    StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -318,6 +319,13 @@ fn login_ssh(definition: &ContextDefinition) -> i32 {
                 println!(
                     "result: native login command exited successfully; remote session usability remains unverified"
                 );
+                match observe_ssh_transport(definition) {
+                    Ok(observation) => println!(
+                        "post-login transport reuse: {}",
+                        ssh_transport_reuse_label(observation.transport_reuse())
+                    ),
+                    Err(_) => println!("post-login transport reuse: unknown"),
+                }
                 0
             }
             (Some(code), None) => {
@@ -636,6 +644,18 @@ fn ssh_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32
         eprintln!("SSH Provider Profile is not configured");
         return Err(2);
     };
+    let observation = observe_ssh_transport(definition)?;
+    StatusReport::local_ssh(definition.name(), profile, &observation).map_err(|failure| {
+        eprintln!("could not render status: {failure}");
+        5
+    })
+}
+
+fn observe_ssh_transport(definition: &ContextDefinition) -> Result<SshTransportObservation, i32> {
+    let Some(profile) = definition.ssh() else {
+        eprintln!("SSH Provider Profile is not configured");
+        return Err(2);
+    };
     let Some(home) = env::var_os("HOME") else {
         eprintln!("SSH transport status requires HOME");
         return Err(2);
@@ -645,14 +665,18 @@ fn ssh_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32
         2
     })?;
     let status = SshTransportStatus::new(runner, PathBuf::from(home).join(".ssh"));
-    let observation = status.observe(profile).map_err(|failure| {
+    status.observe(profile).map_err(|failure| {
         eprintln!("provider status failed: {failure}");
         5
-    })?;
-    StatusReport::local_ssh(definition.name(), profile, &observation).map_err(|failure| {
-        eprintln!("could not render status: {failure}");
-        5
     })
+}
+
+fn ssh_transport_reuse_label(transport_reuse: SshTransportReuse) -> &'static str {
+    match transport_reuse {
+        SshTransportReuse::Active => "active",
+        SshTransportReuse::Inactive => "inactive",
+        SshTransportReuse::Unknown => "unknown",
+    }
 }
 
 fn gcp_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32> {

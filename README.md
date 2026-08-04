@@ -78,17 +78,22 @@ Project Binding and user configuration; a changed context fails closed and
 must be retried.
 
 The default suite never contacts AWS. An explicit live gate exercises
-`doctor`, `status`, and guarded no-op execution against an existing context:
+`doctor`, `status`, and guarded no-op execution against an isolated temporary
+context:
 
 ```console
-AUTHMUX_LIVE_AWS_CONTEXT=crm \
+AUTHMUX_LIVE_AWS_PROFILE=crm-development \
+AUTHMUX_LIVE_AWS_EXPECTED_ACCOUNT=111111111111 \
 AUTHMUX_LIVE_AWS_ACKNOWLEDGE_CACHE_WRITES=1 \
 cargo test --test live_aws -- --ignored --exact \
   configured_aws_context_completes_the_live_cli_workflow
 ```
 
-This gate may cause the AWS CLI to refresh provider-owned caches during the STS
-preflight. Captured provider output is not printed by the test.
+Use a real non-secret profile name and Expected Identity in place of the
+fictional values. The gate requires read-only local identity matching, may
+cause the AWS CLI to refresh provider-owned SSO or login caches during the STS
+preflight, and removes its temporary authmux configuration. Captured provider
+output is not printed by the test.
 
 The user configuration remains at
 `$XDG_CONFIG_HOME/authmux/config.toml` or `~/.config/authmux/config.toml`. The

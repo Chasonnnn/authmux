@@ -306,6 +306,8 @@ Deliverables:
 - [ ] Prove native AWS profiles and modern IAM Identity Center behavior,
   including concurrent profiles that share one SSO session; add no first-class
   external AWS session-tool integration in 0.1.
+- [x] Execute the opt-in live AWS gate for one user-owned profile without
+  retaining provider identifiers or raw output.
 - [x] Compare the fictional AWS mismatch workflow against Atmos and against a
   `direnv` plus native-CLI control, using Granted for AWS where it is already
   configured; record versioned build-vs-adopt evidence.

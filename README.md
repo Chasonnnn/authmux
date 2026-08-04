@@ -44,6 +44,18 @@ Identity. It retains only the account segment of supported AWS ARNs. It always
 reports Session Usability as `indeterminate`; use guarded `exec` when
 provider-validated identity evidence is required.
 
+Explicit AWS Reauthentication delegates to the native profile mode:
+
+```console
+authmux login crm --provider aws
+```
+
+Console-login profiles use `aws login`; IAM Identity Center profiles use
+`aws sso login`. For a role profile, authmux validates the selected role's
+target account and reauthenticates its declared source profile. The preview
+shows both profile selectors before the terminal-attached native command runs.
+Native success does not by itself claim live Session Usability.
+
 JSON output follows the checked-in, versioned
 [`status-v3` schema](docs/schemas/status-v3.schema.json). Human and JSON reports
 are rendered from the same typed observation; neither includes raw provider
@@ -81,7 +93,9 @@ plane. GCP execution does not claim live credential usability before spawn,
 and mixed-provider execution remains unsupported. Explicit GCP login delegates
 `gcloud auth login` to the selected named configuration with the terminal
 attached; it never updates ADC or claims live success from the native exit
-alone. The AWS `exec` preflight uses
+alone. Explicit AWS login selects `aws login` or `aws sso login` from bounded
+documented profile metadata, follows protected role source-profile chains, and
+never reads native credential caches. The AWS `exec` preflight uses
 normal AWS CLI credential resolution, which may update AWS-owned caches under
 its documented behavior; authmux does not request login or capture the
 resulting Credential.
@@ -228,6 +242,7 @@ Start here:
 - [ADR 0006](docs/adr/0006-observe-gcp-selection-without-running-gcloud.md) — zero-write GCP observation boundary
 - [ADR 0007](docs/adr/0007-guard-gcp-exec-with-local-selection.md) — guarded GCP execution boundary
 - [ADR 0008](docs/adr/0008-delegate-gcp-login-to-selected-gcloud-configuration.md) — explicit native GCP login
+- [ADR 0009](docs/adr/0009-delegate-aws-login-by-native-profile-mode.md) — explicit native AWS login mode selection
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

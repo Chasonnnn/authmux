@@ -1,6 +1,8 @@
 //! Authentication-context policy and execution orchestration.
 
 mod aws_adapter;
+#[cfg(unix)]
+mod aws_login;
 mod config;
 mod context_engine;
 mod doctor;
@@ -18,6 +20,8 @@ mod ssh_readiness;
 mod ssh_transport_status;
 
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
+#[cfg(unix)]
+pub use aws_login::{AwsLoginFailure, AwsLoginMode, AwsLoginPlan, AwsLoginPlanner};
 pub use config::{
     ConfigFailure, ContextDefinition, GcloudProviderDefinition, GcpAdcProviderDefinition,
     GcpProviderDefinition, ProjectBinding, SshProviderDefinition, UserConfig,

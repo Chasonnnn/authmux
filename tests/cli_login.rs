@@ -83,6 +83,120 @@ fn gcp_login_previews_selected_account_and_delegates_to_gcloud() {
 }
 
 #[test]
+fn aws_console_login_previews_the_selected_profile_and_delegates_to_aws() {
+    let fixture = LoginFixture::new("aws-console-success");
+    let bin_directory = fixture.configure_aws_console(0);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "aws-console", "--provider", "aws"])
+        .env("HOME", fixture.path.join("home"))
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .env("AWS_PROFILE", "ambient-profile-must-not-pass")
+        .env("AWS_ACCESS_KEY_ID", "AKIAFICTIONALMUSTNOTPASS")
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "login: aws-console\n\
+         provider: aws\n\
+         AWS Provider Profile: cornell-development\n\
+         expected AWS account: 111111111111\n\
+         reauthentication mode: console_login\n\
+         native login profile: cornell-development\n\
+         native command: aws login --profile cornell-development --no-cli-auto-prompt\n\
+         native argv: login|--profile|cornell-development|--no-cli-auto-prompt\n\
+         AWS_PROFILE=cornell-development\n\
+         inherited AWS_ACCESS_KEY_ID: absent\n\
+         result: native AWS login command exited successfully; live session usability remains unverified\n"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn aws_identity_center_login_uses_the_selected_sso_profile() {
+    let fixture = LoginFixture::new("aws-sso-success");
+    let bin_directory = fixture.configure_aws_sso(0);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "aws-sso", "--provider", "aws"])
+        .env("HOME", fixture.path.join("home"))
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("reauthentication mode: iam_identity_center\n"));
+    assert!(stdout.contains("native login profile: research-sso\n"));
+    assert!(
+        stdout.contains(
+            "native command: aws sso login --profile research-sso --no-cli-auto-prompt\n"
+        )
+    );
+    assert!(
+        stdout.contains("native argv: sso|login|--profile|research-sso|--no-cli-auto-prompt\n")
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn aws_role_login_reauthenticates_its_declared_source_profile() {
+    let fixture = LoginFixture::new("aws-role-source");
+    let bin_directory = fixture.configure_aws_role_source(0);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "aws-role", "--provider", "aws"])
+        .env("HOME", fixture.path.join("home"))
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("AWS Provider Profile: workload-operator\n"));
+    assert!(stdout.contains("expected AWS account: 333333333333\n"));
+    assert!(stdout.contains("reauthentication mode: console_login\n"));
+    assert!(stdout.contains("native login profile: source-console\n"));
+    assert!(
+        stdout
+            .contains("native command: aws login --profile source-console --no-cli-auto-prompt\n")
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn aws_login_preserves_native_failure_without_claiming_success() {
+    let fixture = LoginFixture::new("aws-native-failure");
+    let bin_directory = fixture.configure_aws_console(42);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "aws-console"])
+        .env("HOME", fixture.path.join("home"))
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    assert_eq!(output.status.code(), Some(42));
+    assert!(stdout.starts_with("login: aws-console\nprovider: aws\n"));
+    assert!(!stdout.contains("exited successfully"));
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr is UTF-8"),
+        "native AWS login command exited with status 42\n"
+    );
+}
+
+#[test]
 fn single_provider_gcp_login_does_not_require_a_provider_flag() {
     let fixture = LoginFixture::new("gcp-implicit-provider");
     let bin_directory = fixture.configure_gcp(0);
@@ -309,6 +423,36 @@ impl LoginFixture {
         self.write_fake_gcloud(exit_code)
     }
 
+    fn configure_aws_console(&self, exit_code: i32) -> PathBuf {
+        self.write_config(
+            "version = 1\n\
+             [contexts.aws-console.providers.aws]\n\
+             profile = \"cornell-development\"\n\
+             expected_account = \"111111111111\"\n",
+        );
+        self.write_fake_aws_console(exit_code)
+    }
+
+    fn configure_aws_sso(&self, exit_code: i32) -> PathBuf {
+        self.write_config(
+            "version = 1\n\
+             [contexts.aws-sso.providers.aws]\n\
+             profile = \"research-sso\"\n\
+             expected_account = \"222222222222\"\n",
+        );
+        self.write_fake_aws_sso(exit_code)
+    }
+
+    fn configure_aws_role_source(&self, exit_code: i32) -> PathBuf {
+        self.write_config(
+            "version = 1\n\
+             [contexts.aws-role.providers.aws]\n\
+             profile = \"workload-operator\"\n\
+             expected_account = \"333333333333\"\n",
+        );
+        self.write_fake_aws_role_source(exit_code)
+    }
+
     fn configure_impersonated_gcp(&self, exit_code: i32) -> PathBuf {
         let home = self.path.join("home");
         fs::create_dir_all(home.join(".config/gcloud"))
@@ -428,6 +572,94 @@ impl LoginFixture {
             .permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&gcloud, permissions).expect("fake gcloud is executable");
+        directory
+    }
+
+    fn write_fake_aws_console(&self, exit_code: i32) -> PathBuf {
+        let directory = self.path.join("bin");
+        fs::create_dir_all(&directory).expect("bin directory is created");
+        let aws = directory.join("aws");
+        fs::write(
+            &aws,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1 $2 $3\" = \"configure get login_session\" ]; then printf 'arn:aws:iam::111111111111:user/fictional-developer\\n'; exit 0; fi\n\
+                 if [ \"$1 $2 $3\" = \"configure get sso_account_id\" ]; then exit 1; fi\n\
+                 if [ \"$1\" = \"login\" ]; then\n\
+                   : > '{}'\n\
+                   printf 'native argv: %s|%s|%s|%s\\n' \"$1\" \"$2\" \"$3\" \"$4\"\n\
+                   printf 'AWS_PROFILE=%s\\n' \"$AWS_PROFILE\"\n\
+                   if [ -n \"${{AWS_ACCESS_KEY_ID+x}}\" ]; then printf 'inherited AWS_ACCESS_KEY_ID: present\\n'; else printf 'inherited AWS_ACCESS_KEY_ID: absent\\n'; fi\n\
+                   exit {exit_code}\n\
+                 fi\n\
+                 exit 64\n",
+                self.path.join("aws-login-ran").display()
+            ),
+        )
+        .expect("fake aws is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fake aws metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fake aws is executable");
+        directory
+    }
+
+    fn write_fake_aws_sso(&self, exit_code: i32) -> PathBuf {
+        let directory = self.path.join("bin");
+        fs::create_dir_all(&directory).expect("bin directory is created");
+        let aws = directory.join("aws");
+        fs::write(
+            &aws,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1 $2 $3\" = \"configure get login_session\" ]; then exit 1; fi\n\
+                 if [ \"$1 $2 $3\" = \"configure get sso_account_id\" ]; then printf '222222222222\\n'; exit 0; fi\n\
+                 if [ \"$1 $2\" = \"sso login\" ]; then\n\
+                   : > '{}'\n\
+                   printf 'native argv: %s|%s|%s|%s|%s\\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$5\"\n\
+                   exit {exit_code}\n\
+                 fi\n\
+                 exit 64\n",
+                self.path.join("aws-sso-login-ran").display()
+            ),
+        )
+        .expect("fake aws is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fake aws metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fake aws is executable");
+        directory
+    }
+
+    fn write_fake_aws_role_source(&self, exit_code: i32) -> PathBuf {
+        let directory = self.path.join("bin");
+        fs::create_dir_all(&directory).expect("bin directory is created");
+        let aws = directory.join("aws");
+        fs::write(
+            &aws,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1 $2 $3 $4 $5\" = \"configure get role_arn --profile workload-operator\" ]; then printf 'arn:aws:iam::333333333333:role/fictional-workload-operator\\n'; exit 0; fi\n\
+                 if [ \"$1 $2 $3 $4 $5\" = \"configure get source_profile --profile workload-operator\" ]; then printf 'source-console\\n'; exit 0; fi\n\
+                 if [ \"$1 $2 $3 $4 $5\" = \"configure get login_session --profile source-console\" ]; then printf 'arn:aws:iam::111111111111:user/fictional-developer\\n'; exit 0; fi\n\
+                 if [ \"$1 $2 $3 $4 $5\" = \"configure get sso_account_id --profile source-console\" ]; then exit 1; fi\n\
+                 if [ \"$1\" = \"configure\" ]; then exit 1; fi\n\
+                 if [ \"$1\" = \"login\" ]; then\n\
+                   : > '{}'\n\
+                   exit {exit_code}\n\
+                 fi\n\
+                 exit 64\n",
+                self.path.join("aws-role-login-ran").display()
+            ),
+        )
+        .expect("fake aws is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fake aws metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fake aws is executable");
         directory
     }
 }

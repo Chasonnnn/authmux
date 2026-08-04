@@ -159,7 +159,7 @@ where
     }
 }
 
-fn login_session_account(login_session: &str) -> Option<&str> {
+pub(crate) fn login_session_account(login_session: &str) -> Option<&str> {
     let parts = login_session.split(':').collect::<Vec<_>>();
     let ["arn", partition, service, "", account, resource] = parts.as_slice() else {
         return None;

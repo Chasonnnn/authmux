@@ -12,11 +12,11 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
 use authmux::{
-    AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
-    ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
-    ExecutionSelection, GcpDoctor, GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus,
-    GcpLoginPlan, ProcessRunner, ProjectBinding, SecureProcessRunner, SshDoctor,
-    SshTransportStatus, StatusEngine, StatusReport, UserConfig,
+    AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, AwsLoginPlan, AwsLoginPlanner, CommandSpec,
+    ContextDefinition, ContextEngine, ContextListReport, DoctorOutcome, DoctorReport,
+    ExecutionContextResolver, ExecutionFailure, ExecutionSelection, GcpDoctor, GcpExecutionFailure,
+    GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, ProcessRunner, ProjectBinding,
+    SecureProcessRunner, SshDoctor, SshTransportStatus, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -80,12 +80,128 @@ fn login(selection: ContextSelection, provider: Option<ProviderSelection>) -> i3
     };
 
     match provider {
-        ProviderSelection::Aws => {
-            eprintln!("AWS login is not implemented yet");
-            2
-        }
+        ProviderSelection::Aws => login_aws(&definition),
         ProviderSelection::Ssh => login_ssh(&definition),
         ProviderSelection::Gcp => login_gcp(&definition),
+    }
+}
+
+fn login_aws(definition: &ContextDefinition) -> i32 {
+    let Some(context) = definition.aws() else {
+        eprintln!("AWS Provider Profile is not configured");
+        return 2;
+    };
+    let planning_runner = match SecureProcessRunner::for_authmux() {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let plan = match AwsLoginPlanner::new(planning_runner).plan(context) {
+        Ok(plan) => plan,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return failure.exit_code();
+        }
+    };
+
+    if let Err(error) = display_aws_login_preview(definition, &plan) {
+        eprintln!("could not display AWS login preview ({})", error.kind());
+        return 5;
+    }
+
+    let Ok((current_config, _)) = load_user_config() else {
+        eprintln!("refusing AWS login: authentication context could not be re-resolved");
+        return 6;
+    };
+    let Ok(current_definition) = current_config.resolve_context_definition(definition.name())
+    else {
+        eprintln!("refusing AWS login: authentication context could not be re-resolved");
+        return 6;
+    };
+    if let Err(failure) = AwsLoginPlan::ensure_context_unchanged(definition, &current_definition) {
+        eprintln!("{failure}");
+        return failure.exit_code();
+    }
+    let Some(current_context) = current_definition.aws() else {
+        eprintln!("refusing AWS login: authentication context could not be re-resolved");
+        return 6;
+    };
+    let current_planning_runner = match SecureProcessRunner::for_authmux() {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let current_plan = match AwsLoginPlanner::new(current_planning_runner).plan(current_context) {
+        Ok(plan) => plan,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return failure.exit_code();
+        }
+    };
+    if plan != current_plan {
+        let failure = authmux::AwsLoginFailure::PlanChanged;
+        eprintln!("{failure}");
+        return failure.exit_code();
+    }
+
+    run_aws_login(&plan)
+}
+
+fn display_aws_login_preview(
+    definition: &ContextDefinition,
+    plan: &AwsLoginPlan,
+) -> Result<(), std::io::Error> {
+    println!("login: {}", definition.name());
+    println!("provider: aws");
+    println!("AWS Provider Profile: {}", plan.provider_profile());
+    println!("expected AWS account: {}", plan.expected_account());
+    println!("reauthentication mode: {}", plan.mode());
+    println!("native login profile: {}", plan.login_profile());
+    let native_arguments = plan
+        .command()
+        .arguments()
+        .iter()
+        .map(|argument| argument.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("native command: aws {native_arguments}");
+    std::io::stdout().flush()
+}
+
+fn run_aws_login(plan: &AwsLoginPlan) -> i32 {
+    let runner = match SecureProcessRunner::for_authmux() {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    match runner.run(plan.command(), plan.selection()) {
+        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
+            (Some(0), None) => {
+                println!(
+                    "result: native AWS login command exited successfully; live session usability remains unverified"
+                );
+                0
+            }
+            (Some(code), None) => {
+                eprintln!("native AWS login command exited with status {code}");
+                code
+            }
+            (None, Some(signal)) => terminate_with_signal(signal),
+            _ => {
+                eprintln!("native AWS login command ended without an exit code or signal");
+                5
+            }
+        },
+        Err(failure) => {
+            eprintln!("{failure}");
+            exit_code(&failure)
+        }
     }
 }
 

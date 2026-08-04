@@ -430,8 +430,10 @@ Exit criteria:
 
 Deliverables:
 
-- [ ] Implement `login` plans for all initial providers; GCP and SSH are
-  implemented and AWS remains.
+- [x] Implement `login` plans for all initial providers: AWS, GCP, and SSH.
+- [x] Delegate explicit AWS Reauthentication to `aws login` or `aws sso login`
+  from bounded local profile metadata, including guarded source-profile
+  traversal for selected role profiles under ADR 0009.
 - [x] Delegate explicit GCP user reauthentication to `gcloud auth login` under
   the selected named configuration, with a direct terminal, no ADC mutation,
   and material pre-spawn revalidation under ADR 0008.

@@ -132,6 +132,27 @@ fn option_shaped_ssh_host_alias_is_rejected_without_echoing_it() {
 }
 
 #[test]
+fn secret_shaped_ssh_expected_identity_is_rejected_without_echoing_it() {
+    let seeded_secret = "ghp_fictional_remote_principal";
+    let source = format!(
+        "version = 1\n\
+         [contexts.empire.providers.ssh]\n\
+         host_alias = \"empire-alpha\"\n\
+         expected_remote_principal = \"{seeded_secret}\"\n"
+    );
+
+    let failure =
+        UserConfig::parse(&source).expect_err("secret-shaped SSH identity must be rejected");
+    let diagnostic = failure.to_string();
+
+    assert_eq!(
+        diagnostic,
+        "user configuration contains a secret-shaped value where a provider profile was expected"
+    );
+    assert!(!diagnostic.contains(seeded_secret));
+}
+
+#[test]
 fn project_binding_reports_repository_root_provenance() {
     let fixture = FixtureDirectory::new("binding-provenance");
     fs::create_dir_all(fixture.path.join(".git")).expect("repository marker is created");

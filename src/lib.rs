@@ -22,6 +22,8 @@ pub use context_engine::{
     ContextEngine, ExecutionContextResolver, ProcessRunner, ProviderAdapter, StatusAdapter,
     StatusEngine,
 };
+#[cfg(unix)]
+pub use doctor::GcpDoctor;
 pub use doctor::{AwsDoctor, DoctorCheck, DoctorOutcome, DoctorResult, SshDoctor};
 pub use domain::{
     AuthenticationContext, CommandSpec, DomainFailure, EvidenceLevel, ExecutionFailure,

@@ -1,14 +1,21 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "command": "status",
   "context": "empire",
   "observations": [
     {
       "provider": "ssh",
+      "credential_plane": null,
       "profile": "empire-alpha",
       "expected_identity": "researcher@example.invalid",
       "observed_identity": null,
       "identity_match": "unverified",
+      "expected_source_identity": null,
+      "observed_source_identity": null,
+      "source_identity_match": null,
+      "expected_project": null,
+      "observed_project": null,
+      "project_match": null,
       "session_usability": "indeterminate",
       "reason": "insufficient_evidence",
       "reauthentication_need": "unknown",

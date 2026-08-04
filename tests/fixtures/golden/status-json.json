@@ -1,14 +1,21 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "command": "status",
   "context": "crm",
   "observations": [
     {
       "provider": "aws",
+      "credential_plane": null,
       "profile": "crm-development",
       "expected_identity": "111111111111",
       "observed_identity": "111111111111",
       "identity_match": "match",
+      "expected_source_identity": null,
+      "observed_source_identity": null,
+      "source_identity_match": null,
+      "expected_project": null,
+      "observed_project": null,
+      "project_match": null,
       "session_usability": "indeterminate",
       "reason": "insufficient_evidence",
       "reauthentication_need": "unknown",

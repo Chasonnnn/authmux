@@ -146,9 +146,10 @@ Behavioral rules:
 ## 7. Configuration sketch
 
 The schema is versioned and remains pre-1.0. The current tracer accepts optional
-AWS and SSH Provider Profiles, optional context descriptions, and the
-restricted repository binding; Google Cloud remains unimplemented. Existing
-AWS-only version 1 configuration requires no migration.
+AWS, SSH, and Google Cloud Provider Profiles, optional context descriptions,
+and the restricted repository binding. Google Cloud models gcloud CLI and ADC
+as separate Credential Planes. Existing version 1 configuration requires no
+migration.
 
 ```toml
 version = 1
@@ -388,7 +389,7 @@ Deliverables:
 - [x] Define and test the environment inheritance allowlist.
 - [x] Re-resolve the context immediately before process spawn and fail closed
   if the Project Binding, Provider Profile, or Expected Identity changed.
-- [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
+- [x] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
   observations for every declared credential plane. The disposable,
   network-denied command-purity gate failed, so ADR 0006 prohibits gcloud
   subprocesses and credential-database reads from `status` and `doctor`.

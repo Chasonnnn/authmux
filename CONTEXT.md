@@ -22,6 +22,12 @@ as an AWS profile, Google Cloud configuration name, or user-owned SSH host
 alias.
 _Avoid_: Credential profile, secret profile
 
+**Credential Plane**:
+A distinct native authentication surface within one Provider that has its own
+selection and evidence semantics, such as the gcloud CLI and Application
+Default Credentials (ADC) within Google Cloud.
+_Avoid_: Provider when the surfaces share one Provider but not one Session
+
 **Expected Identity**:
 The Provider Identity a developer declares as appropriate for an
 Authentication Context.

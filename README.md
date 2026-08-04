@@ -45,7 +45,7 @@ reports Session Usability as `indeterminate`; use guarded `exec` when
 provider-validated identity evidence is required.
 
 JSON output follows the checked-in, versioned
-[`status-v1` schema](docs/schemas/status-v1.schema.json). Human and JSON reports
+[`status-v3` schema](docs/schemas/status-v3.schema.json). Human and JSON reports
 are rendered from the same typed observation; neither includes raw provider
 output.
 
@@ -55,12 +55,16 @@ Diagnose local setup without contacting a provider:
 authmux doctor
 authmux doctor --context crm --json
 authmux doctor --context empire --provider ssh
+authmux doctor --context crm --provider gcp
 ```
 
 For AWS, `doctor` requires AWS CLI v2 and compares supported local profile
 metadata. For SSH, it checks only configured intent and the installed OpenSSH
 client, then warns that remote identity, authorization, MFA state, Session
-Usability, and expiry were not observed. Mixed-provider contexts require an
+Usability, and expiry were not observed. For GCP, it locates but never executes
+gcloud, checks protected selection metadata independently for the gcloud CLI
+and ADC planes, and never opens credential databases or the ADC file.
+Mixed-provider contexts require an
 explicit `--provider`. Warnings exit successfully; failed checks exit `1`.
 
 The implemented AWS-first tracer reads a user-owned context, observes the
@@ -69,11 +73,12 @@ mismatch, and otherwise creates a process-scoped environment for one child
 command. A repository binding may select only a user-defined context; it cannot
 override providers or commands, is never discovered above the nearest `.git`
 root, and reports its canonical source path through the Config Module. A
-matching child preserves its exit code or terminating Unix signal. `login` and
-Google Cloud are still planned work. The `exec` preflight
-uses normal AWS CLI credential
-resolution, which may update AWS-owned caches under its documented behavior;
-authmux does not request login or capture the resulting Credential.
+matching child preserves its exit code or terminating Unix signal. Google
+Cloud `status`, `doctor`, and process-selector construction are implemented;
+GCP `exec` and `login` remain planned work. The AWS `exec` preflight uses
+normal AWS CLI credential resolution, which may update AWS-owned caches under
+its documented behavior; authmux does not request login or capture the
+resulting Credential.
 
 Child processes inherit only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TERM`, plus
 the selected provider profile. Credential environment variables and unrelated
@@ -129,8 +134,24 @@ expected_remote_principal = "researcher@example.invalid"
 ```
 
 `host_alias` names user-owned SSH intent; authmux does not evaluate the SSH
-configuration behind it. Existing AWS-only configuration remains valid. The
-optional root binding contains only:
+configuration behind it. Google Cloud selection declares each Credential Plane
+explicitly; paths are validated but never printed by status reports:
+
+```toml
+[contexts.crm.providers.gcp.gcloud]
+config_dir = "/home/researcher/.config/gcloud"
+configuration = "crm-research"
+expected_principal = "researcher@example.test"
+expected_project = "fictional-project"
+
+[contexts.crm.providers.gcp.adc]
+mode = "credential_file"
+credential_file = "/home/researcher/.config/gcloud/adc/crm.json"
+expected_principal = "workload@example.test"
+```
+
+Existing AWS-only configuration remains valid. The optional root binding
+contains only:
 
 ```toml
 version = 1
@@ -145,11 +166,11 @@ binding must make that decision explicitly.
 
 ## Current state
 
-The crate now contains the first test-driven AWS identity guard, bounded
-provider probe runner, strict user and project config parsers, and isolated
-child runner with exit/signal parity. It remains a development tracer rather
-than a released CLI. CI runs the same format, strict lint, test, and locked
-build gates on pinned Ubuntu and macOS runners.
+The crate now contains AWS identity guards, independent gcloud CLI and ADC
+selection observations, SSH local transport observation, bounded provider
+probes, strict configuration parsing, and isolated child execution. It remains
+a development tracer rather than a released CLI. CI runs the same format,
+strict lint, test, and locked build gates on pinned Ubuntu and macOS runners.
 
 Start here:
 
@@ -158,6 +179,7 @@ Start here:
 - [AGENTS.md](AGENTS.md) — repository operating contract
 - [ADR 0001](docs/adr/0001-delegate-credential-custody.md) — credential-custody decision
 - [ADR 0002](docs/adr/0002-separate-status-from-execution-preflight.md) — read-only status boundary
+- [ADR 0006](docs/adr/0006-observe-gcp-selection-without-running-gcloud.md) — zero-write GCP observation boundary
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

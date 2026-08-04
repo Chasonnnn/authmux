@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chasonnnn/authmux/blob/main/docs/schemas/context-list-v2.schema.json",
+  "title": "authmux context list schema version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "command", "contexts"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "command": { "const": "context_list" },
+    "contexts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/context" }
+    }
+  },
+  "$defs": {
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "providers"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": ["string", "null"] },
+        "providers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/provider" }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "credential_plane",
+        "profile",
+        "expected_identity"
+      ],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "credential_plane": {
+          "type": ["string", "null"],
+          "enum": ["gcloud_cli", "adc", null]
+        },
+        "profile": { "type": "string", "minLength": 1 },
+        "expected_identity": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -14,8 +14,8 @@ use nix::unistd::Pid;
 use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
     ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
-    ExecutionSelection, ProcessRunner, ProjectBinding, SecureProcessRunner, SshDoctor,
-    SshTransportStatus, StatusEngine, StatusReport, UserConfig,
+    ExecutionSelection, GcpDoctor, GcpLocalStatus, ProcessRunner, ProjectBinding,
+    SecureProcessRunner, SshDoctor, SshTransportStatus, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -84,6 +84,10 @@ fn login(selection: ContextSelection, provider: Option<ProviderSelection>) -> i3
             2
         }
         ProviderSelection::Ssh => login_ssh(&definition),
+        ProviderSelection::Gcp => {
+            eprintln!("GCP login is not implemented");
+            2
+        }
     }
 }
 
@@ -293,6 +297,7 @@ fn show_status(
     let report = match provider {
         ProviderSelection::Aws => aws_status_report(&definition),
         ProviderSelection::Ssh => ssh_status_report(&definition),
+        ProviderSelection::Gcp => gcp_status_report(&definition),
     };
     let report = match report {
         Ok(report) => report,
@@ -351,6 +356,27 @@ fn ssh_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32
         5
     })?;
     StatusReport::local_ssh(definition.name(), profile, &observation).map_err(|failure| {
+        eprintln!("could not render status: {failure}");
+        5
+    })
+}
+
+fn gcp_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32> {
+    let Some(profile) = definition.gcp() else {
+        eprintln!("GCP Provider Profile is not configured");
+        return Err(2);
+    };
+    let Some(home) = env::var_os("HOME") else {
+        eprintln!("GCP status requires HOME");
+        return Err(2);
+    };
+    let observations = GcpLocalStatus::new(PathBuf::from(home))
+        .observe(profile)
+        .map_err(|failure| {
+            eprintln!("provider status failed: {failure}");
+            5
+        })?;
+    StatusReport::local_gcp(definition.name(), profile, &observations).map_err(|failure| {
         eprintln!("could not render status: {failure}");
         5
     })
@@ -420,20 +446,28 @@ fn resolve_doctor_provider(
         let configured = match provider {
             ProviderSelection::Aws => definition.aws().is_some(),
             ProviderSelection::Ssh => definition.ssh().is_some(),
+            ProviderSelection::Gcp => definition.gcp().is_some(),
         };
         return configured.then_some(provider).ok_or_else(|| {
             "requested authentication context does not define the selected provider".to_owned()
         });
     }
 
-    match (definition.aws().is_some(), definition.ssh().is_some()) {
-        (true, false) => Ok(ProviderSelection::Aws),
-        (false, true) => Ok(ProviderSelection::Ssh),
-        (true, true) => Err(
+    let configured = [
+        definition.aws().is_some().then_some(ProviderSelection::Aws),
+        definition.ssh().is_some().then_some(ProviderSelection::Ssh),
+        definition.gcp().is_some().then_some(ProviderSelection::Gcp),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    match configured.as_slice() {
+        [provider] => Ok(*provider),
+        [] => Err("authentication context does not define a provider".to_owned()),
+        _ => Err(
             "doctor requires --provider when the authentication context defines multiple providers"
                 .to_owned(),
         ),
-        (false, false) => Err("authentication context does not define a provider".to_owned()),
     }
 }
 
@@ -445,20 +479,28 @@ fn resolve_status_provider(
         let configured = match provider {
             ProviderSelection::Aws => definition.aws().is_some(),
             ProviderSelection::Ssh => definition.ssh().is_some(),
+            ProviderSelection::Gcp => definition.gcp().is_some(),
         };
         return configured.then_some(provider).ok_or_else(|| {
             "requested authentication context does not define the selected provider".to_owned()
         });
     }
 
-    match (definition.aws().is_some(), definition.ssh().is_some()) {
-        (true, false) => Ok(ProviderSelection::Aws),
-        (false, true) => Ok(ProviderSelection::Ssh),
-        (true, true) => Err(
+    let configured = [
+        definition.aws().is_some().then_some(ProviderSelection::Aws),
+        definition.ssh().is_some().then_some(ProviderSelection::Ssh),
+        definition.gcp().is_some().then_some(ProviderSelection::Gcp),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    match configured.as_slice() {
+        [provider] => Ok(*provider),
+        [] => Err("authentication context does not define a provider".to_owned()),
+        _ => Err(
             "status requires --provider when the authentication context defines multiple providers"
                 .to_owned(),
         ),
-        (false, false) => Err("authentication context does not define a provider".to_owned()),
     }
 }
 
@@ -470,6 +512,7 @@ fn resolve_login_provider(
         let configured = match provider {
             ProviderSelection::Aws => definition.aws().is_some(),
             ProviderSelection::Ssh => definition.ssh().is_some(),
+            ProviderSelection::Gcp => definition.gcp().is_some(),
         };
         return configured.then_some(provider).ok_or_else(|| {
             "requested authentication context does not define the selected provider".to_owned()
@@ -510,6 +553,14 @@ fn diagnose_provider(
                 .ok_or_else(|| "SSH Provider Profile is not configured".to_owned())?;
             Ok(SshDoctor::new(runner).diagnose(definition.name(), profile))
         }
+        ProviderSelection::Gcp => {
+            let profile = definition
+                .gcp()
+                .ok_or_else(|| "GCP Provider Profile is not configured".to_owned())?;
+            let home = env::var_os("HOME").ok_or_else(|| "GCP doctor requires HOME".to_owned())?;
+            Ok(GcpDoctor::new(PathBuf::from(home), env::var_os("PATH"))
+                .diagnose(definition.name(), profile))
+        }
     }
 }
 
@@ -541,6 +592,22 @@ fn print_context(
             "expected SSH remote principal: {}",
             ssh.expected_remote_principal()
         );
+    }
+    if let Some(gcp) = definition.gcp() {
+        if let Some(gcloud) = gcp.gcloud() {
+            println!("gcloud configuration: {}", gcloud.configuration());
+            println!("expected gcloud identity: {}", gcloud.expected_principal());
+            if let Some(source) = gcloud.expected_source_account() {
+                println!("expected gcloud source identity: {source}");
+            }
+            if let Some(project) = gcloud.expected_project() {
+                println!("expected gcloud project: {project}");
+            }
+        }
+        if let Some(adc) = gcp.adc() {
+            println!("ADC mode: credential_file");
+            println!("expected ADC identity: {}", adc.expected_principal());
+        }
     }
     println!("provider state: not observed");
 }
@@ -611,6 +678,7 @@ enum CliCommand {
 enum ProviderSelection {
     Aws,
     Ssh,
+    Gcp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -777,7 +845,7 @@ fn parse_status(
     arguments: &[OsString],
 ) -> Result<(ContextSelection, Option<ProviderSelection>, ReportFormat), String> {
     const USAGE: &str =
-        "usage: authmux status [--context <context>] [--provider <aws|ssh>] [--json]";
+        "usage: authmux status [--context <context>] [--provider <aws|gcp|ssh>] [--json]";
     let mut selection = None;
     let mut provider = None;
     let mut format = ReportFormat::Human;
@@ -803,6 +871,7 @@ fn parse_status(
                     .and_then(|argument| argument.to_str())
                 {
                     Some("aws") => Some(ProviderSelection::Aws),
+                    Some("gcp") => Some(ProviderSelection::Gcp),
                     Some("ssh") => Some(ProviderSelection::Ssh),
                     _ => return Err(USAGE.to_owned()),
                 };
@@ -823,7 +892,7 @@ fn parse_doctor(
     arguments: &[OsString],
 ) -> Result<(ContextSelection, Option<ProviderSelection>, ReportFormat), String> {
     const USAGE: &str =
-        "usage: authmux doctor [--context <context>] [--provider <aws|ssh>] [--json]";
+        "usage: authmux doctor [--context <context>] [--provider <aws|gcp|ssh>] [--json]";
     let mut selection = None;
     let mut provider = None;
     let mut format = ReportFormat::Human;
@@ -849,6 +918,7 @@ fn parse_doctor(
                     .and_then(|argument| argument.to_str())
                 {
                     Some("aws") => Some(ProviderSelection::Aws),
+                    Some("gcp") => Some(ProviderSelection::Gcp),
                     Some("ssh") => Some(ProviderSelection::Ssh),
                     _ => return Err(USAGE.to_owned()),
                 };

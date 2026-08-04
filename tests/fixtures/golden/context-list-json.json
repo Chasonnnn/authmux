@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "command": "context_list",
   "contexts": [
     {
@@ -8,6 +8,7 @@
       "providers": [
         {
           "provider": "aws",
+          "credential_plane": null,
           "profile": "analytics-readonly",
           "expected_identity": "222222222222"
         }
@@ -19,6 +20,7 @@
       "providers": [
         {
           "provider": "aws",
+          "credential_plane": null,
           "profile": "crm-development",
           "expected_identity": "111111111111"
         }

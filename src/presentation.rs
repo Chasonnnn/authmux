@@ -9,15 +9,18 @@ use crate::{
     IdentityMatch, ObservationReason, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
 #[cfg(unix)]
-use crate::{SshProviderDefinition, SshTransportObservation, SshTransportReuse};
+use crate::{
+    GcpCredentialPlane, GcpPlaneObservation, GcpProjectMatch, GcpProviderDefinition,
+    SshProviderDefinition, SshTransportObservation, SshTransportReuse,
+};
 
-const STATUS_SCHEMA_VERSION: u32 = 2;
-const CONTEXT_LIST_SCHEMA_VERSION: u32 = 1;
+const STATUS_SCHEMA_VERSION: u32 = 3;
+const CONTEXT_LIST_SCHEMA_VERSION: u32 = 2;
 const DOCTOR_SCHEMA_VERSION: u32 = 1;
 
 pub struct StatusReport {
     context: String,
-    observation: StatusEntry,
+    observations: Vec<StatusEntry>,
 }
 
 pub struct ContextListReport {
@@ -65,6 +68,7 @@ struct ContextListEntry {
 #[derive(Serialize)]
 struct ProviderReference {
     provider: &'static str,
+    credential_plane: Option<&'static str>,
     profile: String,
     expected_identity: String,
 }
@@ -74,16 +78,23 @@ struct StatusDocument<'a> {
     schema_version: u32,
     command: &'static str,
     context: &'a str,
-    observations: [&'a StatusEntry; 1],
+    observations: &'a [StatusEntry],
 }
 
 #[derive(Serialize)]
 struct StatusEntry {
     provider: &'static str,
+    credential_plane: Option<&'static str>,
     profile: String,
     expected_identity: String,
     observed_identity: Option<String>,
     identity_match: &'static str,
+    expected_source_identity: Option<String>,
+    observed_source_identity: Option<String>,
+    source_identity_match: Option<&'static str>,
+    expected_project: Option<String>,
+    observed_project: Option<String>,
+    project_match: Option<&'static str>,
     session_usability: &'static str,
     reason: &'static str,
     reauthentication_need: &'static str,
@@ -112,14 +123,21 @@ impl StatusReport {
 
         Ok(Self {
             context: context.name().to_owned(),
-            observation: StatusEntry {
+            observations: vec![StatusEntry {
                 provider: "aws",
+                credential_plane: None,
                 profile: context.provider_profile().to_owned(),
                 expected_identity: context.expected_account().to_owned(),
                 observed_identity: observation
                     .observed_identity()
                     .map(|identity| identity.account().to_owned()),
                 identity_match: identity_match(observation.identity_match()),
+                expected_source_identity: None,
+                observed_source_identity: None,
+                source_identity_match: None,
+                expected_project: None,
+                observed_project: None,
+                project_match: None,
                 session_usability: session_usability(observation.usability()),
                 reason: observation_reason(observation.reason()),
                 reauthentication_need: reauthentication_need(observation.reauthentication_need()),
@@ -127,7 +145,7 @@ impl StatusReport {
                 provider_contacted: false,
                 transport_reuse: None,
                 observed_at_unix,
-            },
+            }],
         })
     }
 
@@ -155,12 +173,19 @@ impl StatusReport {
 
         Ok(Self {
             context: context_name.to_owned(),
-            observation: StatusEntry {
+            observations: vec![StatusEntry {
                 provider: "ssh",
+                credential_plane: None,
                 profile: profile.host_alias().to_owned(),
                 expected_identity: profile.expected_remote_principal().to_owned(),
                 observed_identity: None,
                 identity_match: "unverified",
+                expected_source_identity: None,
+                observed_source_identity: None,
+                source_identity_match: None,
+                expected_project: None,
+                observed_project: None,
+                project_match: None,
                 session_usability: "indeterminate",
                 reason,
                 reauthentication_need: "unknown",
@@ -168,54 +193,47 @@ impl StatusReport {
                 provider_contacted: observation.provider_contacted(),
                 transport_reuse: Some(ssh_transport_reuse(observation.transport_reuse())),
                 observed_at_unix,
-            },
+            }],
+        })
+    }
+
+    /// Builds a presentation-safe report for independent local GCP planes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if an observation cannot be represented or
+    /// does not correspond to a configured plane.
+    #[cfg(unix)]
+    pub fn local_gcp(
+        context_name: &str,
+        profile: &GcpProviderDefinition,
+        observations: &[GcpPlaneObservation],
+    ) -> Result<Self, PresentationFailure> {
+        let observations = observations
+            .iter()
+            .map(|observation| gcp_status_entry(profile, observation))
+            .collect::<Result<Vec<_>, _>>()?;
+        if observations.is_empty() {
+            return Err(PresentationFailure::new(
+                "GCP status did not contain a credential plane",
+            ));
+        }
+        Ok(Self {
+            context: context_name.to_owned(),
+            observations,
         })
     }
 
     #[must_use]
     pub fn render_human(&self) -> String {
-        let entry = &self.observation;
         let mut report = String::new();
         writeln!(report, "context: {}", self.context).expect("writing to a String cannot fail");
-        writeln!(report, "provider: {}", entry.provider).expect("writing to a String cannot fail");
-        writeln!(report, "profile: {}", entry.profile).expect("writing to a String cannot fail");
-        writeln!(report, "expected identity: {}", entry.expected_identity)
-            .expect("writing to a String cannot fail");
-        writeln!(
-            report,
-            "observed identity: {}",
-            entry.observed_identity.as_deref().unwrap_or("not observed")
-        )
-        .expect("writing to a String cannot fail");
-        writeln!(report, "identity match: {}", entry.identity_match)
-            .expect("writing to a String cannot fail");
-        writeln!(report, "session usability: {}", entry.session_usability)
-            .expect("writing to a String cannot fail");
-        writeln!(report, "reason: {}", entry.reason).expect("writing to a String cannot fail");
-        writeln!(
-            report,
-            "reauthentication need: {}",
-            entry.reauthentication_need
-        )
-        .expect("writing to a String cannot fail");
-        writeln!(report, "evidence level: {}", entry.evidence_level)
-            .expect("writing to a String cannot fail");
-        writeln!(
-            report,
-            "provider contacted: {}",
-            if entry.provider_contacted {
-                "yes"
-            } else {
-                "no"
+        for (index, entry) in self.observations.iter().enumerate() {
+            if index > 0 {
+                writeln!(report).expect("writing to a String cannot fail");
             }
-        )
-        .expect("writing to a String cannot fail");
-        if let Some(transport_reuse) = entry.transport_reuse {
-            writeln!(report, "transport reuse: {transport_reuse}")
-                .expect("writing to a String cannot fail");
+            render_status_entry(&mut report, entry);
         }
-        writeln!(report, "observed at unix: {}", entry.observed_at_unix)
-            .expect("writing to a String cannot fail");
         report
     }
 
@@ -230,13 +248,155 @@ impl StatusReport {
             schema_version: STATUS_SCHEMA_VERSION,
             command: "status",
             context: &self.context,
-            observations: [&self.observation],
+            observations: &self.observations,
         };
         let mut json = serde_json::to_string_pretty(&document)
             .map_err(|_| PresentationFailure::new("could not serialize status report"))?;
         json.push('\n');
         Ok(json)
     }
+}
+
+fn render_status_entry(report: &mut String, entry: &StatusEntry) {
+    writeln!(report, "provider: {}", entry.provider).expect("writing to a String cannot fail");
+    if let Some(plane) = entry.credential_plane {
+        writeln!(report, "credential plane: {plane}").expect("writing to a String cannot fail");
+    }
+    writeln!(report, "profile: {}", entry.profile).expect("writing to a String cannot fail");
+    writeln!(report, "expected identity: {}", entry.expected_identity)
+        .expect("writing to a String cannot fail");
+    writeln!(
+        report,
+        "observed identity: {}",
+        entry.observed_identity.as_deref().unwrap_or("not observed")
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(report, "identity match: {}", entry.identity_match)
+        .expect("writing to a String cannot fail");
+    if let Some(expected) = &entry.expected_source_identity {
+        writeln!(report, "expected source identity: {expected}")
+            .expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "observed source identity: {}",
+            entry
+                .observed_source_identity
+                .as_deref()
+                .unwrap_or("not observed")
+        )
+        .expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "source identity match: {}",
+            entry.source_identity_match.unwrap_or("unverified")
+        )
+        .expect("writing to a String cannot fail");
+    }
+    if let Some(expected) = &entry.expected_project {
+        writeln!(report, "expected project: {expected}").expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "observed project: {}",
+            entry.observed_project.as_deref().unwrap_or("not observed")
+        )
+        .expect("writing to a String cannot fail");
+        writeln!(
+            report,
+            "project match: {}",
+            entry.project_match.unwrap_or("unverified")
+        )
+        .expect("writing to a String cannot fail");
+    }
+    writeln!(report, "session usability: {}", entry.session_usability)
+        .expect("writing to a String cannot fail");
+    writeln!(report, "reason: {}", entry.reason).expect("writing to a String cannot fail");
+    writeln!(
+        report,
+        "reauthentication need: {}",
+        entry.reauthentication_need
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(report, "evidence level: {}", entry.evidence_level)
+        .expect("writing to a String cannot fail");
+    writeln!(
+        report,
+        "provider contacted: {}",
+        if entry.provider_contacted {
+            "yes"
+        } else {
+            "no"
+        }
+    )
+    .expect("writing to a String cannot fail");
+    if let Some(transport_reuse) = entry.transport_reuse {
+        writeln!(report, "transport reuse: {transport_reuse}")
+            .expect("writing to a String cannot fail");
+    }
+    writeln!(report, "observed at unix: {}", entry.observed_at_unix)
+        .expect("writing to a String cannot fail");
+}
+
+#[cfg(unix)]
+fn gcp_status_entry(
+    profile: &GcpProviderDefinition,
+    observation: &GcpPlaneObservation,
+) -> Result<StatusEntry, PresentationFailure> {
+    let status = observation.status();
+    let observed_at_unix = status
+        .observed_at()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| PresentationFailure::new("status observation time is invalid"))?
+        .as_secs();
+    let (plane, native_profile, expected_identity, expected_source, expected_project) =
+        match observation.plane() {
+            GcpCredentialPlane::GcloudCli => {
+                let gcloud = profile.gcloud().ok_or_else(|| {
+                    PresentationFailure::new("GCP status plane is not configured")
+                })?;
+                (
+                    "gcloud_cli",
+                    gcloud.configuration().to_owned(),
+                    gcloud.expected_principal().to_owned(),
+                    gcloud.expected_source_account().map(str::to_owned),
+                    gcloud.expected_project().map(str::to_owned),
+                )
+            }
+            GcpCredentialPlane::Adc => {
+                let adc = profile.adc().ok_or_else(|| {
+                    PresentationFailure::new("GCP status plane is not configured")
+                })?;
+                (
+                    "adc",
+                    "credential_file".to_owned(),
+                    adc.expected_principal().to_owned(),
+                    None,
+                    None,
+                )
+            }
+        };
+    Ok(StatusEntry {
+        provider: "gcp",
+        credential_plane: Some(plane),
+        profile: native_profile,
+        expected_identity,
+        observed_identity: status
+            .observed_identity()
+            .map(|identity| identity.value().to_owned()),
+        identity_match: identity_match(status.identity_match()),
+        expected_source_identity: expected_source,
+        observed_source_identity: observation.observed_source_identity().map(str::to_owned),
+        source_identity_match: observation.source_identity_match().map(identity_match),
+        expected_project,
+        observed_project: observation.observed_project().map(str::to_owned),
+        project_match: gcp_project_match(observation.project_match()),
+        session_usability: session_usability(status.usability()),
+        reason: observation_reason(status.reason()),
+        reauthentication_need: reauthentication_need(status.reauthentication_need()),
+        evidence_level: evidence_level(status.evidence_level()),
+        provider_contacted: observation.provider_contacted(),
+        transport_reuse: None,
+        observed_at_unix,
+    })
 }
 
 impl ContextListReport {
@@ -249,6 +409,7 @@ impl ContextListReport {
                 if let Some(context) = definition.aws() {
                     providers.push(ProviderReference {
                         provider: "aws",
+                        credential_plane: None,
                         profile: context.provider_profile().to_owned(),
                         expected_identity: context.expected_account().to_owned(),
                     });
@@ -256,9 +417,28 @@ impl ContextListReport {
                 if let Some(ssh) = definition.ssh() {
                     providers.push(ProviderReference {
                         provider: "ssh",
+                        credential_plane: None,
                         profile: ssh.host_alias().to_owned(),
                         expected_identity: ssh.expected_remote_principal().to_owned(),
                     });
+                }
+                if let Some(gcp) = definition.gcp() {
+                    if let Some(gcloud) = gcp.gcloud() {
+                        providers.push(ProviderReference {
+                            provider: "gcp",
+                            credential_plane: Some("gcloud_cli"),
+                            profile: gcloud.configuration().to_owned(),
+                            expected_identity: gcloud.expected_principal().to_owned(),
+                        });
+                    }
+                    if let Some(adc) = gcp.adc() {
+                        providers.push(ProviderReference {
+                            provider: "gcp",
+                            credential_plane: Some("adc"),
+                            profile: "credential_file".to_owned(),
+                            expected_identity: adc.expected_principal().to_owned(),
+                        });
+                    }
                 }
                 ContextListEntry {
                     name: definition.name().to_owned(),
@@ -301,6 +481,26 @@ impl ContextListReport {
                         writeln!(
                             report,
                             "  expected SSH remote principal: {}",
+                            provider.expected_identity
+                        )
+                        .expect("writing to a String cannot fail");
+                    }
+                    "gcp" if provider.credential_plane == Some("gcloud_cli") => {
+                        writeln!(report, "  gcloud configuration: {}", provider.profile)
+                            .expect("writing to a String cannot fail");
+                        writeln!(
+                            report,
+                            "  expected gcloud identity: {}",
+                            provider.expected_identity
+                        )
+                        .expect("writing to a String cannot fail");
+                    }
+                    "gcp" if provider.credential_plane == Some("adc") => {
+                        writeln!(report, "  ADC mode: {}", provider.profile)
+                            .expect("writing to a String cannot fail");
+                        writeln!(
+                            report,
+                            "  expected ADC identity: {}",
                             provider.expected_identity
                         )
                         .expect("writing to a String cannot fail");
@@ -421,6 +621,16 @@ const fn identity_match(value: IdentityMatch) -> &'static str {
         IdentityMatch::Match => "match",
         IdentityMatch::Mismatch => "mismatch",
         IdentityMatch::Unverified => "unverified",
+    }
+}
+
+#[cfg(unix)]
+const fn gcp_project_match(value: GcpProjectMatch) -> Option<&'static str> {
+    match value {
+        GcpProjectMatch::Match => Some("match"),
+        GcpProjectMatch::Mismatch => Some("mismatch"),
+        GcpProjectMatch::Unverified => Some("unverified"),
+        GcpProjectMatch::NotApplicable => None,
     }
 }
 

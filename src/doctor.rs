@@ -1,10 +1,23 @@
 use std::str;
 use std::time::Duration;
 
+#[cfg(unix)]
+use std::ffi::{OsStr, OsString};
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
+#[cfg(unix)]
+use std::path::PathBuf;
+
 use crate::{
     AuthenticationContext, AwsLocalMetadataAdapter, CommandSpec, ExecutionSelection, IdentityMatch,
     ObservationReason, ProbePolicy, ProbeRunner, SshClientReadinessCheck, SshProviderDefinition,
     StatusEngine,
+};
+#[cfg(unix)]
+use crate::{
+    GcpCredentialPlane, GcpLocalStatus, GcpPlaneObservation, GcpProjectMatch, GcpProviderDefinition,
 };
 
 pub struct AwsDoctor<VR, SR> {
@@ -14,6 +27,59 @@ pub struct AwsDoctor<VR, SR> {
 
 pub struct SshDoctor<R> {
     runner: R,
+}
+
+#[cfg(unix)]
+pub struct GcpDoctor {
+    home: PathBuf,
+    search_path: Option<OsString>,
+}
+
+#[cfg(unix)]
+impl GcpDoctor {
+    #[must_use]
+    pub fn new(home: impl Into<PathBuf>, search_path: Option<OsString>) -> Self {
+        Self {
+            home: home.into(),
+            search_path,
+        }
+    }
+
+    #[must_use]
+    pub fn diagnose(&self, context_name: &str, profile: &GcpProviderDefinition) -> DoctorResult {
+        let mut checks = vec![DoctorCheck::pass(
+            "configuration",
+            "GCP credential planes resolved",
+        )];
+        if profile.gcloud().is_some() {
+            checks.push(
+                if gcloud_executable_available(self.search_path.as_deref()) {
+                    DoctorCheck::pass("gcloud_executable", "gcloud executable is available")
+                } else {
+                    DoctorCheck::fail(
+                        "gcloud_executable",
+                        "gcloud executable could not be located safely",
+                    )
+                },
+            );
+        }
+        match GcpLocalStatus::new(&self.home).observe(profile) {
+            Ok(observations) => append_gcp_observation_checks(&mut checks, &observations),
+            Err(_) => checks.push(DoctorCheck::fail(
+                "gcp_selection",
+                "GCP selection metadata could not be inspected safely",
+            )),
+        }
+        checks.push(DoctorCheck::warning(
+            "gcp_session",
+            "credential usability, refresh, authorization, and expiry were not observed",
+        ));
+        DoctorResult {
+            context: context_name.to_owned(),
+            provider_contacted: false,
+            checks,
+        }
+    }
 }
 
 impl<R> SshDoctor<R>
@@ -185,6 +251,103 @@ impl DoctorResult {
         } else {
             DoctorOutcome::Pass
         }
+    }
+}
+
+#[cfg(unix)]
+fn gcloud_executable_available(search_path: Option<&OsStr>) -> bool {
+    let Some(search_path) = search_path else {
+        return false;
+    };
+    std::env::split_paths(search_path).any(|directory| {
+        if directory.as_os_str().is_empty() {
+            return false;
+        }
+        let candidate = directory.join("gcloud");
+        let Ok(candidate) = fs::canonicalize(candidate) else {
+            return false;
+        };
+        fs::metadata(candidate).is_ok_and(|metadata| {
+            metadata.is_file()
+                && metadata.permissions().mode() & 0o111 != 0
+                && metadata.permissions().mode() & 0o022 == 0
+        })
+    })
+}
+
+#[cfg(unix)]
+fn append_gcp_observation_checks(
+    checks: &mut Vec<DoctorCheck>,
+    observations: &[GcpPlaneObservation],
+) {
+    for observation in observations {
+        match observation.plane() {
+            GcpCredentialPlane::GcloudCli => append_gcloud_checks(checks, observation),
+            GcpCredentialPlane::Adc => checks.push(match observation.status().reason() {
+                Some(ObservationReason::InsufficientEvidence) => {
+                    DoctorCheck::pass("adc_selector", "ADC credential-file selector is available")
+                }
+                Some(ObservationReason::Missing) => {
+                    DoctorCheck::fail("adc_selector", "ADC credential-file selector is missing")
+                }
+                _ => DoctorCheck::fail(
+                    "adc_selector",
+                    "ADC credential-file selector is not protected",
+                ),
+            }),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn append_gcloud_checks(checks: &mut Vec<DoctorCheck>, observation: &GcpPlaneObservation) {
+    checks.push(match observation.status().identity_match() {
+        IdentityMatch::Match => {
+            DoctorCheck::pass("gcloud_identity", "local gcloud identity matches")
+        }
+        IdentityMatch::Mismatch => {
+            DoctorCheck::fail("gcloud_identity", "local gcloud identity does not match")
+        }
+        IdentityMatch::Unverified
+            if observation.status().reason() == Some(ObservationReason::ProviderError) =>
+        {
+            DoctorCheck::fail("gcloud_identity", "gcloud selection metadata is unsafe")
+        }
+        IdentityMatch::Unverified => DoctorCheck::warning(
+            "gcloud_identity",
+            "gcloud selection has no supported local identity metadata",
+        ),
+    });
+    if let Some(source_match) = observation.source_identity_match() {
+        checks.push(match source_match {
+            IdentityMatch::Match => DoctorCheck::pass(
+                "gcloud_source_identity",
+                "local gcloud source identity matches",
+            ),
+            IdentityMatch::Mismatch => DoctorCheck::fail(
+                "gcloud_source_identity",
+                "local gcloud source identity does not match",
+            ),
+            IdentityMatch::Unverified => DoctorCheck::warning(
+                "gcloud_source_identity",
+                "local gcloud source identity was not observed",
+            ),
+        });
+    }
+    match observation.project_match() {
+        GcpProjectMatch::Match => checks.push(DoctorCheck::pass(
+            "gcloud_project",
+            "local gcloud project matches",
+        )),
+        GcpProjectMatch::Mismatch => checks.push(DoctorCheck::fail(
+            "gcloud_project",
+            "local gcloud project does not match",
+        )),
+        GcpProjectMatch::Unverified => checks.push(DoctorCheck::warning(
+            "gcloud_project",
+            "local gcloud project was not observed",
+        )),
+        GcpProjectMatch::NotApplicable => {}
     }
 }
 

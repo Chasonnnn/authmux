@@ -65,6 +65,40 @@ fn gcloud_child_is_blocked_when_identity_or_project_does_not_match() {
 }
 
 #[test]
+fn impersonated_gcloud_child_is_blocked_when_source_identity_does_not_match() {
+    let fixture = GcpExecFixture::new("source-identity-mismatch");
+    fixture.configure_impersonation("other@example.test", "workload@example.test");
+    let marker = fixture.path.join("child-ran");
+    let gcloud = fixture.write_marker_child("gcloud", &marker);
+
+    let output = fixture.run(&gcloud);
+
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("diagnostic is UTF-8"),
+        "refusing child execution: expected GCP source identity does not match the protected local gcloud selection\n"
+    );
+    assert!(!marker.exists(), "source mismatch must block child");
+}
+
+#[test]
+fn gcloud_child_requires_a_declared_gcloud_plane_even_when_adc_exists() {
+    let fixture = GcpExecFixture::new("gcloud-plane-required");
+    fixture.replace_with_adc_only_context();
+    let marker = fixture.path.join("child-ran");
+    let gcloud = fixture.write_marker_child("gcloud", &marker);
+
+    let output = fixture.run(&gcloud);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("diagnostic is UTF-8"),
+        "refusing child execution: gcloud requires a declared GCP gcloud CLI plane\n"
+    );
+    assert!(!marker.exists(), "gcloud without a CLI plane must not run");
+}
+
+#[test]
 fn non_gcloud_child_requires_an_explicit_adc_plane() {
     let fixture = GcpExecFixture::new("adc-required");
     let marker = fixture.path.join("child-ran");
@@ -250,6 +284,57 @@ impl GcpExecFixture {
         )
         .expect("fictional named configuration is rewritten");
         set_mode(&named, 0o600);
+    }
+
+    fn configure_impersonation(&self, source_account: &str, target_account: &str) {
+        let named = self.gcloud_dir().join("configurations/config_crm-research");
+        fs::write(
+            &named,
+            format!(
+                "[core]\n\
+                 account = {source_account}\n\
+                 project = fictional-project\n\
+                 [auth]\n\
+                 impersonate_service_account = {target_account}\n"
+            ),
+        )
+        .expect("fictional impersonated configuration is written");
+        set_mode(&named, 0o600);
+        fs::write(
+            self.authmux_config_root().join("authmux/config.toml"),
+            format!(
+                "version = 1\n\
+                 [contexts.crm.providers.gcp.gcloud]\n\
+                 config_dir = \"{}\"\n\
+                 configuration = \"crm-research\"\n\
+                 expected_principal = \"{target_account}\"\n\
+                 expected_source_account = \"researcher@example.test\"\n\
+                 expected_project = \"fictional-project\"\n",
+                self.gcloud_dir().display()
+            ),
+        )
+        .expect("impersonated authmux configuration is written");
+    }
+
+    fn replace_with_adc_only_context(&self) {
+        let adc_directory = self.gcloud_dir().join("adc");
+        fs::create_dir_all(&adc_directory).expect("ADC directory is created");
+        set_mode(&adc_directory, 0o700);
+        fs::write(self.adc_file(), "fictional contents are never opened")
+            .expect("fictional ADC file is written");
+        set_mode(&self.adc_file(), 0o600);
+        fs::write(
+            self.authmux_config_root().join("authmux/config.toml"),
+            format!(
+                "version = 1\n\
+                 [contexts.crm.providers.gcp.adc]\n\
+                 mode = \"credential_file\"\n\
+                 credential_file = \"{}\"\n\
+                 expected_principal = \"workload@example.test\"\n",
+                self.adc_file().display()
+            ),
+        )
+        .expect("ADC-only authmux configuration is written");
     }
 
     fn remove_named_configuration(&self) {

@@ -14,8 +14,11 @@ command, but it violates authmux's contract that `status` is read-only.
 Configured AWS profile metadata is weaker. The supported
 `aws configure get sso_account_id --profile NAME` command can report an account
 declared by an IAM Identity Center profile without reading raw configuration or
-credential cache files. It cannot prove that a Session exists, is usable, or
-will resolve to that account during a future service call.
+credential cache files. AWS CLI v2 login profiles instead declare a documented
+`login_session` ARN. `aws configure get login_session --profile NAME` can expose
+that local value without reading the native login cache. Neither setting can
+prove that a Session exists, is usable, or will resolve to that account during a
+future service call.
 
 ## Decision
 
@@ -26,6 +29,9 @@ Use separate Adapter contracts for the two observations:
   state;
 - `status` may inspect only documented local profile metadata and must never
   reuse the execution preflight;
+- when `sso_account_id` is absent, `status` may inspect `login_session`, accept
+  only supported AWS IAM or STS ARN forms, retain only the 12-digit account
+  segment, and discard the resource portion;
 - an account read from local metadata can produce `match` or `mismatch`, but
   Session Usability remains `indeterminate`, Reauthentication Need remains
   `unknown`, and Evidence Level is `local_metadata`;
@@ -45,6 +51,10 @@ The command is honestly useful for detecting a profile-to-project account
 misconfiguration, but it cannot answer whether AWS access works now. Users must
 run a guarded command to obtain provider validation. The status model must
 support an optional Observed Identity rather than inventing a placeholder.
+
+The fallback adds a second bounded local command for profiles without
+`sso_account_id`. Malformed `sso_account_id` data does not trigger the fallback;
+it remains a provider error so ambiguous metadata cannot be silently bypassed.
 
 The separate Status Adapter adds one Interface, justified by materially
 different side-effect and evidence contracts. Future providers must classify

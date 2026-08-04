@@ -33,8 +33,10 @@ Installed versions:
 |---|---|---|---|---|---:|---|
 | AWS CLI installation | `aws --version` | local executable and semantic version | Loads the installed CLI only; does not inspect a Session or contact AWS | runtime, platform, and architecture metadata are discarded after narrow version parsing | 2 s / 4 KiB | doctor-only local check; require AWS CLI v2 |
 | AWS local profile | `aws configure get sso_account_id --profile NAME` | configured account metadata | Reads native config; does not establish Session usability and is absent for many profile types | account ID | 2 s / 4 KiB | possible read-only status evidence, never provider validation |
+| AWS login local profile | `aws configure get login_session --profile NAME` | account embedded in configured login ARN | Reads native config, not the login cache; does not establish Session usability | full principal ARN is parsed narrowly, only its account is retained, and its resource is discarded | 2 s / 4 KiB | fallback local-metadata evidence when `sso_account_id` is absent; never provider validation |
 | AWS live identity | `aws sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt` | provider-validated account | May retrieve, assume, or automatically refresh temporary credentials and update AWS-owned caches | account ID; native stderr may contain sensitive metadata | 5 s / 4 KiB | allowed for guarded `exec` preflight; prohibited for read-only `status` |
-| AWS login | `aws sso login --profile NAME` | explicit Reauthentication | Opens an authorization flow and writes provider-owned cache state | authorization URLs and organization metadata | interactive | explicit `login` only |
+| AWS IAM Identity Center login | `aws sso login --profile NAME` | explicit Reauthentication | Opens an authorization flow and writes provider-owned cache state | authorization URLs and organization metadata | interactive | explicit `login` only |
+| AWS console credential login | `aws login --profile NAME` | explicit Reauthentication for a login profile | Opens an authorization flow and writes provider-owned login cache state | authorization URLs and principal metadata | interactive | explicit `login` only; available in AWS CLI 2.32.0 and later |
 | gcloud CLI local identity | `gcloud auth list --filter=status:ACTIVE --format=value(account) --configuration NAME` | locally active credentialed account | Reads the selected gcloud configuration; does not prove token usability or authorization | account identifier | 3 s / 8 KiB | Phase 2 local-metadata candidate |
 | gcloud CLI live validation | no generic safe `whoami` command selected | none | Service calls can refresh access credentials and require project-specific authorization | provider errors can include project and account metadata | n/a | unresolved; do not claim live CLI status |
 | Google ADC | no command selected | none | ADC uses a separate search order and client libraries may refresh credentials; success in gcloud CLI says nothing about ADC | credential-file paths and principals can be sensitive | n/a | independent Phase 2 evidence surface |
@@ -106,6 +108,7 @@ a no-write provider mechanism is proven. ADR 0002 records this separation.
 
 - [AWS caller identity](https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html)
 - [AWS IAM Identity Center configuration and refresh](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html)
+- [AWS console credential login](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html)
 - [AWS configuration and credential files](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)
 - [gcloud auth list](https://docs.cloud.google.com/sdk/gcloud/reference/auth/list)
 - [Google Application Default Credentials search order](https://docs.cloud.google.com/docs/authentication/application-default-credentials)

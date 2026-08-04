@@ -22,6 +22,33 @@ impl<R> AwsLocalMetadataAdapter<R> {
     }
 }
 
+impl<R> AwsLocalMetadataAdapter<R>
+where
+    R: ProbeRunner,
+{
+    fn probe_setting(
+        &self,
+        context: &AuthenticationContext,
+        setting: &str,
+    ) -> Result<crate::ProbeOutput, ProviderFailure> {
+        let command = CommandSpec::new(
+            "aws",
+            [
+                "configure",
+                "get",
+                setting,
+                "--profile",
+                context.provider_profile(),
+            ],
+        )?;
+        self.runner.probe(
+            &command,
+            &ExecutionSelection::none(),
+            ProbePolicy::bounded(Duration::from_secs(2), 4_096),
+        )
+    }
+}
+
 impl<R> AwsAdapter<R> {
     #[must_use]
     pub fn new(runner: R) -> Self {
@@ -94,43 +121,74 @@ where
         &self,
         context: &AuthenticationContext,
     ) -> Result<StatusObservation, ProviderFailure> {
-        let command = CommandSpec::new(
-            "aws",
-            [
-                "configure",
-                "get",
-                "sso_account_id",
-                "--profile",
-                context.provider_profile(),
-            ],
-        )?;
-        let output = self.runner.probe(
-            &command,
-            &ExecutionSelection::none(),
-            ProbePolicy::bounded(Duration::from_secs(2), 4_096),
-        )?;
+        let output = self.probe_setting(context, "sso_account_id")?;
 
         if output.was_truncated() {
             return Ok(indeterminate_local(ObservationReason::ProviderError));
         }
-        if output.exit_code() != 0 {
+        if output.exit_code() == 0 {
+            let Ok(account) = str::from_utf8(output.stdout()) else {
+                return Ok(indeterminate_local(ObservationReason::ProviderError));
+            };
+            let Ok(observed_identity) = ObservedIdentity::aws_account(account.trim()) else {
+                return Ok(indeterminate_local(ObservationReason::ProviderError));
+            };
+
+            return Ok(indeterminate_with_identity(observed_identity));
+        }
+
+        let login_output = self.probe_setting(context, "login_session")?;
+        if login_output.was_truncated() {
+            return Ok(indeterminate_local(ObservationReason::ProviderError));
+        }
+        if login_output.exit_code() != 0 {
             return Ok(indeterminate_local(ObservationReason::InsufficientEvidence));
         }
 
-        let Ok(account) = str::from_utf8(output.stdout()) else {
+        let Ok(login_session) = str::from_utf8(login_output.stdout()) else {
             return Ok(indeterminate_local(ObservationReason::ProviderError));
         };
-        let Ok(observed_identity) = ObservedIdentity::aws_account(account.trim()) else {
+        let Some(account) = login_session_account(login_session.trim()) else {
+            return Ok(indeterminate_local(ObservationReason::ProviderError));
+        };
+        let Ok(observed_identity) = ObservedIdentity::aws_account(account) else {
             return Ok(indeterminate_local(ObservationReason::ProviderError));
         };
 
-        Ok(StatusObservation::indeterminate(
-            observed_identity,
-            ObservationReason::InsufficientEvidence,
-            ReauthenticationNeed::Unknown,
-            EvidenceLevel::LocalMetadata,
-        ))
+        Ok(indeterminate_with_identity(observed_identity))
     }
+}
+
+fn login_session_account(login_session: &str) -> Option<&str> {
+    let parts = login_session.split(':').collect::<Vec<_>>();
+    let ["arn", partition, service, "", account, resource] = parts.as_slice() else {
+        return None;
+    };
+    if !matches!(*partition, "aws" | "aws-us-gov" | "aws-cn")
+        || !matches!(*service, "iam" | "sts")
+        || account.len() != 12
+        || !account.bytes().all(|byte| byte.is_ascii_digit())
+        || !resource.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return None;
+    }
+    let supported_resource = match *service {
+        "iam" => {
+            *resource == "root" || resource.starts_with("user/") || resource.starts_with("role/")
+        }
+        "sts" => resource.starts_with("assumed-role/") || resource.starts_with("federated-user/"),
+        _ => false,
+    };
+    supported_resource.then_some(account)
+}
+
+fn indeterminate_with_identity(observed_identity: ObservedIdentity) -> StatusObservation {
+    StatusObservation::indeterminate(
+        observed_identity,
+        ObservationReason::InsufficientEvidence,
+        ReauthenticationNeed::Unknown,
+        EvidenceLevel::LocalMetadata,
+    )
 }
 
 fn indeterminate_local(reason: ObservationReason) -> StatusObservation {

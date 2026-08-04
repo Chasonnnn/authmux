@@ -39,9 +39,10 @@ authmux status --context crm --json
 ```
 
 This status can detect whether an IAM Identity Center profile's configured
-account matches the Expected Identity. It always reports Session Usability as
-`indeterminate`; use guarded `exec` when provider-validated identity evidence is
-required.
+account or an AWS login profile's `login_session` account matches the Expected
+Identity. It retains only the account segment of supported AWS ARNs. It always
+reports Session Usability as `indeterminate`; use guarded `exec` when
+provider-validated identity evidence is required.
 
 JSON output follows the checked-in, versioned
 [`status-v1` schema](docs/schemas/status-v1.schema.json). Human and JSON reports

@@ -17,7 +17,7 @@ pub use context_engine::{
     ContextEngine, ExecutionContextResolver, ProcessRunner, ProviderAdapter, StatusAdapter,
     StatusEngine,
 };
-pub use doctor::{AwsDoctor, DoctorCheck, DoctorOutcome, DoctorResult};
+pub use doctor::{AwsDoctor, DoctorCheck, DoctorOutcome, DoctorResult, SshDoctor};
 pub use domain::{
     AuthenticationContext, CommandSpec, DomainFailure, EvidenceLevel, ExecutionFailure,
     ExecutionOutcome, ExecutionSelection, IdentityMatch, ObservationReason, ObservedIdentity,

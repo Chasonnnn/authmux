@@ -43,8 +43,11 @@ The first Empire AI slice is a bounded local-readiness Module:
   Reauthentication Need, MFA state, or expiration from local readiness.
 
 Empire AI host alias and Expected Identity are accepted in user configuration
-and can be inspected without invoking OpenSSH. CLI `doctor` integration and
-explicit interactive terminal handoff require separate behavior slices.
+and can be inspected without invoking OpenSSH. Provider-scoped `doctor` applies
+the bounded client check and returns a separate warning for all unobserved
+remote properties. Mixed-provider contexts require explicit provider selection
+before any probe. Explicit interactive terminal handoff requires a separate
+behavior slice.
 Hostnames remain user configuration and are never hardcoded from
 institution-specific documentation. SSH-only `status` and `exec` fail before
 provider observation or child execution because no remote evidence or safe

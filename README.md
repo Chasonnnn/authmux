@@ -49,15 +49,19 @@ JSON output follows the checked-in, versioned
 are rendered from the same typed observation; neither includes raw provider
 output.
 
-Diagnose local setup without contacting AWS:
+Diagnose local setup without contacting a provider:
 
 ```console
 authmux doctor
 authmux doctor --context crm --json
+authmux doctor --context empire --provider ssh
 ```
 
-`doctor` checks configuration, requires AWS CLI v2, and compares supported
-local profile metadata. Warnings exit successfully; failed checks exit `1`.
+For AWS, `doctor` requires AWS CLI v2 and compares supported local profile
+metadata. For SSH, it checks only configured intent and the installed OpenSSH
+client, then warns that remote identity, authorization, MFA state, Session
+Usability, and expiry were not observed. Mixed-provider contexts require an
+explicit `--provider`. Warnings exit successfully; failed checks exit `1`.
 
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
@@ -101,10 +105,11 @@ Run its opt-in local gate with:
 
 ```console
 cargo test --test live_ssh -- --ignored --exact \
-  installed_openssh_client_passes_the_local_readiness_gate
+  installed_openssh_client_passes_provider_scoped_doctor
 ```
 
-This proves only that a supported OpenSSH client is installed. Remote identity,
+This proves only that a supported OpenSSH client is installed. The same bounded
+check powers `authmux doctor --context empire --provider ssh`; remote identity,
 authorization, MFA state, Session Usability, and expiry remain unobserved.
 
 The user configuration remains at

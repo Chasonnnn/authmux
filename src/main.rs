@@ -13,7 +13,7 @@ use nix::unistd::Pid;
 use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
     ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
-    ProjectBinding, SecureProcessRunner, StatusEngine, StatusReport, UserConfig,
+    ProjectBinding, SecureProcessRunner, SshDoctor, StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -26,7 +26,11 @@ fn run() -> i32 {
         Ok(CliCommand::ContextShow { selection }) => show_context(selection),
         Ok(CliCommand::ContextList { format }) => show_context_list(format),
         Ok(CliCommand::Status { selection, format }) => show_status(selection, format),
-        Ok(CliCommand::Doctor { selection, format }) => show_doctor(selection, format),
+        Ok(CliCommand::Doctor {
+            selection,
+            provider,
+            format,
+        }) => show_doctor(selection, provider, format),
         Err(message) => {
             eprintln!("{message}");
             2
@@ -205,7 +209,11 @@ fn show_status(selection: ContextSelection, format: ReportFormat) -> i32 {
     0
 }
 
-fn show_doctor(selection: ContextSelection, format: ReportFormat) -> i32 {
+fn show_doctor(
+    selection: ContextSelection,
+    provider: Option<ProviderSelection>,
+    format: ReportFormat,
+) -> i32 {
     let selection = match resolve_selection(selection) {
         Ok(selection) => selection,
         Err(message) => {
@@ -220,28 +228,27 @@ fn show_doctor(selection: ContextSelection, format: ReportFormat) -> i32 {
             return 2;
         }
     };
-    let context = match config.resolve_context(&selection.context_name) {
-        Ok(context) => context,
+    let definition = match config.resolve_context_definition(&selection.context_name) {
+        Ok(definition) => definition,
         Err(failure) => {
             eprintln!("{failure}");
             return 2;
         }
     };
-    let version_runner = match SecureProcessRunner::for_authmux() {
-        Ok(runner) => runner,
-        Err(failure) => {
-            eprintln!("{failure}");
+    let provider = match resolve_doctor_provider(&definition, provider) {
+        Ok(provider) => provider,
+        Err(message) => {
+            eprintln!("{message}");
             return 2;
         }
     };
-    let status_runner = match SecureProcessRunner::for_authmux() {
-        Ok(runner) => runner,
-        Err(failure) => {
-            eprintln!("{failure}");
+    let result = match diagnose_provider(&definition, provider) {
+        Ok(result) => result,
+        Err(message) => {
+            eprintln!("{message}");
             return 2;
         }
     };
-    let result = AwsDoctor::new(version_runner, status_runner).diagnose(&context);
     let outcome = result.outcome();
     let report = DoctorReport::new(&result);
     let rendered = match format {
@@ -256,6 +263,57 @@ fn show_doctor(selection: ContextSelection, format: ReportFormat) -> i32 {
     };
     print!("{rendered}");
     i32::from(outcome == DoctorOutcome::Fail)
+}
+
+fn resolve_doctor_provider(
+    definition: &ContextDefinition,
+    requested: Option<ProviderSelection>,
+) -> Result<ProviderSelection, String> {
+    if let Some(provider) = requested {
+        let configured = match provider {
+            ProviderSelection::Aws => definition.aws().is_some(),
+            ProviderSelection::Ssh => definition.ssh().is_some(),
+        };
+        return configured.then_some(provider).ok_or_else(|| {
+            "requested authentication context does not define the selected provider".to_owned()
+        });
+    }
+
+    match (definition.aws().is_some(), definition.ssh().is_some()) {
+        (true, false) => Ok(ProviderSelection::Aws),
+        (false, true) => Ok(ProviderSelection::Ssh),
+        (true, true) => Err(
+            "doctor requires --provider when the authentication context defines multiple providers"
+                .to_owned(),
+        ),
+        (false, false) => Err("authentication context does not define a provider".to_owned()),
+    }
+}
+
+fn diagnose_provider(
+    definition: &ContextDefinition,
+    provider: ProviderSelection,
+) -> Result<authmux::DoctorResult, String> {
+    match provider {
+        ProviderSelection::Aws => {
+            let version_runner =
+                SecureProcessRunner::for_authmux().map_err(|failure| failure.to_string())?;
+            let status_runner =
+                SecureProcessRunner::for_authmux().map_err(|failure| failure.to_string())?;
+            let context = definition
+                .aws()
+                .ok_or_else(|| "AWS Provider Profile is not configured".to_owned())?;
+            Ok(AwsDoctor::new(version_runner, status_runner).diagnose(context))
+        }
+        ProviderSelection::Ssh => {
+            let runner =
+                SecureProcessRunner::for_authmux().map_err(|failure| failure.to_string())?;
+            let profile = definition
+                .ssh()
+                .ok_or_else(|| "SSH Provider Profile is not configured".to_owned())?;
+            Ok(SshDoctor::new(runner).diagnose(definition.name(), profile))
+        }
+    }
 }
 
 fn print_context(
@@ -342,8 +400,15 @@ enum CliCommand {
     },
     Doctor {
         selection: ContextSelection,
+        provider: Option<ProviderSelection>,
         format: ReportFormat,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProviderSelection {
+    Aws,
+    Ssh,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -384,8 +449,13 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
         Some("context") => parse_context_command(&arguments),
         Some("status") => parse_status(&arguments)
             .map(|(selection, format)| CliCommand::Status { selection, format }),
-        Some("doctor") => parse_doctor(&arguments)
-            .map(|(selection, format)| CliCommand::Doctor { selection, format }),
+        Some("doctor") => {
+            parse_doctor(&arguments).map(|(selection, provider, format)| CliCommand::Doctor {
+                selection,
+                provider,
+                format,
+            })
+        }
         _ => Err("usage: authmux <exec|context|doctor|status> ...".to_owned()),
     }
 }
@@ -493,9 +563,13 @@ fn parse_status(arguments: &[OsString]) -> Result<(ContextSelection, ReportForma
     Ok((selection.unwrap_or(ContextSelection::ProjectBound), format))
 }
 
-fn parse_doctor(arguments: &[OsString]) -> Result<(ContextSelection, ReportFormat), String> {
-    const USAGE: &str = "usage: authmux doctor [--context <context>] [--json]";
+fn parse_doctor(
+    arguments: &[OsString],
+) -> Result<(ContextSelection, Option<ProviderSelection>, ReportFormat), String> {
+    const USAGE: &str =
+        "usage: authmux doctor [--context <context>] [--provider <aws|ssh>] [--json]";
     let mut selection = None;
+    let mut provider = None;
     let mut format = ReportFormat::Human;
     let mut index = 1;
     while index < arguments.len() {
@@ -513,11 +587,26 @@ fn parse_doctor(arguments: &[OsString]) -> Result<(ContextSelection, ReportForma
                 format = ReportFormat::Json;
                 index += 1;
             }
+            Some("--provider") if provider.is_none() => {
+                provider = match arguments
+                    .get(index + 1)
+                    .and_then(|argument| argument.to_str())
+                {
+                    Some("aws") => Some(ProviderSelection::Aws),
+                    Some("ssh") => Some(ProviderSelection::Ssh),
+                    _ => return Err(USAGE.to_owned()),
+                };
+                index += 2;
+            }
             _ => return Err(USAGE.to_owned()),
         }
     }
 
-    Ok((selection.unwrap_or(ContextSelection::ProjectBound), format))
+    Ok((
+        selection.unwrap_or(ContextSelection::ProjectBound),
+        provider,
+        format,
+    ))
 }
 
 fn resolve_selection(selection: ContextSelection) -> Result<ResolvedSelection, String> {

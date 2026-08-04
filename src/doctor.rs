@@ -3,12 +3,63 @@ use std::time::Duration;
 
 use crate::{
     AuthenticationContext, AwsLocalMetadataAdapter, CommandSpec, ExecutionSelection, IdentityMatch,
-    ObservationReason, ProbePolicy, ProbeRunner, StatusEngine,
+    ObservationReason, ProbePolicy, ProbeRunner, SshClientReadinessCheck, SshProviderDefinition,
+    StatusEngine,
 };
 
 pub struct AwsDoctor<VR, SR> {
     version_runner: VR,
     status_runner: SR,
+}
+
+pub struct SshDoctor<R> {
+    runner: R,
+}
+
+impl<R> SshDoctor<R>
+where
+    R: ProbeRunner,
+{
+    #[must_use]
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+
+    #[must_use]
+    pub fn diagnose(&self, context_name: &str, profile: &SshProviderDefinition) -> DoctorResult {
+        let configuration =
+            if profile.host_alias().is_empty() || profile.expected_remote_principal().is_empty() {
+                DoctorCheck::fail("configuration", "SSH Provider Profile is incomplete")
+            } else {
+                DoctorCheck::pass(
+                    "configuration",
+                    "SSH host alias and Expected Identity resolved",
+                )
+            };
+        let openssh = match SshClientReadinessCheck::new(&self.runner).observe() {
+            Ok(readiness) => DoctorCheck::pass(
+                "openssh_client",
+                format!("{} is supported", readiness.client_version()),
+            ),
+            Err(_) => DoctorCheck::fail(
+                "openssh_client",
+                "OpenSSH client readiness could not be established",
+            ),
+        };
+        let checks = vec![
+            configuration,
+            openssh,
+            DoctorCheck::warning(
+                "ssh_remote_session",
+                "remote identity, authorization, MFA state, Session Usability, and expiry were not observed",
+            ),
+        ];
+        DoctorResult {
+            context: context_name.to_owned(),
+            provider_contacted: false,
+            checks,
+        }
+    }
 }
 
 impl<VR, SR> AwsDoctor<VR, SR>

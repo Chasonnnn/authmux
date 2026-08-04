@@ -116,7 +116,7 @@ or a Credential.
 
 ```console
 authmux status [--context NAME] [--json]
-authmux doctor [--context NAME] [--json]
+authmux doctor [--context NAME] [--provider NAME] [--json]
 authmux login <context> [--provider NAME]
 authmux exec [--context NAME] -- <program> [args...]
 authmux context list [--json]
@@ -130,8 +130,9 @@ Behavioral rules:
 - `status` reports observations and exits nonzero only for command/config
   failure. Individual invalid sessions remain data in the report.
 - `doctor` checks config, executable discovery, supported CLI versions, and
-  only provider observations already proven read-only. AWS 0.1 does not contact
-  AWS. Warnings exit `0`; failed checks exit `1`.
+  only provider observations already proven read-only. AWS and SSH checks do
+  not contact their providers. A mixed-provider context requires an explicit
+  `--provider`. Warnings exit `0`; failed checks exit `1`.
 - `login` shows exactly which Provider Profile will be affected and delegates
   to its native flow.
 - `exec` resolves one context, builds a minimal child environment, and uses an
@@ -390,7 +391,7 @@ Deliverables:
   execution selection explicitly unsupported.
 - [x] Add user-owned Empire AI host alias and Expected Identity configuration
   with provider-free context inspection.
-- [ ] Expose OpenSSH readiness through provider-scoped `doctor` without
+- [x] Expose OpenSSH readiness through provider-scoped `doctor` without
   evaluating SSH configuration or contacting the cluster; keep `status` and
   `exec` unsupported until stronger evidence and a safe Execution Scope exist.
 - [ ] Refuse unsafe global switching by default.

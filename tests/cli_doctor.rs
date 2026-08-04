@@ -68,6 +68,78 @@ fn doctor_fails_on_a_local_profile_identity_mismatch() {
     assert!(!sts_marker.exists(), "doctor must not call STS");
 }
 
+#[test]
+fn provider_scoped_ssh_doctor_reports_local_readiness_only() {
+    let fixture = FixtureDirectory::new("doctor-ssh");
+    let (bin_directory, provider_marker) = fixture.configure_ssh();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["doctor", "--context", "empire", "--provider", "ssh"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "doctor: empire\n\
+         result: warning\n\
+         provider contacted: no\n\
+         checks: 3\n\
+         - [pass] configuration: SSH host alias and Expected Identity resolved\n\
+         - [pass] openssh_client: OpenSSH_10.2p1 is supported\n\
+         - [warning] ssh_remote_session: remote identity, authorization, MFA state, Session Usability, and expiry were not observed\n"
+    );
+    assert!(stderr.is_empty());
+    assert!(!stdout.contains("empire-alpha"));
+    assert!(!stdout.contains("researcher@example.invalid"));
+    assert!(
+        !provider_marker.exists(),
+        "SSH doctor must not contact the provider"
+    );
+}
+
+#[test]
+fn mixed_context_requires_explicit_doctor_provider_before_any_probe() {
+    let fixture = FixtureDirectory::new("doctor-mixed-ambiguous");
+    let (bin_directory, provider_marker) = fixture.configure_ssh();
+    fs::write(
+        fixture
+            .path
+            .join("config")
+            .join("authmux")
+            .join("config.toml"),
+        "version = 1\n\
+         [contexts.mixed.providers.aws]\n\
+         profile = \"mixed-development\"\n\
+         expected_account = \"111111111111\"\n\
+         [contexts.mixed.providers.ssh]\n\
+         host_alias = \"empire-alpha\"\n\
+         expected_remote_principal = \"researcher@example.invalid\"\n",
+    )
+    .expect("fictional mixed user config is written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["doctor", "--context", "mixed"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("report is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stdout.is_empty());
+    assert_eq!(
+        stderr,
+        "doctor requires --provider when the authentication context defines multiple providers\n"
+    );
+    assert!(!provider_marker.exists(), "ambiguous doctor must not probe");
+}
+
 struct FixtureDirectory {
     path: PathBuf,
 }
@@ -120,6 +192,43 @@ impl FixtureDirectory {
         .expect("fictional user config is written");
 
         (bin_directory, sts_marker)
+    }
+
+    fn configure_ssh(&self) -> (PathBuf, PathBuf) {
+        let bin_directory = self.path.join("bin");
+        let config_directory = self.path.join("config").join("authmux");
+        fs::create_dir_all(&bin_directory).expect("fixture bin directory is created");
+        fs::create_dir_all(&config_directory).expect("fixture config directory is created");
+
+        let provider_marker = self.path.join("provider-contacted");
+        let ssh = bin_directory.join("ssh");
+        fs::write(
+            &ssh,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$#\" = \"1\" ] && [ \"$1\" = \"-V\" ]; then printf 'OpenSSH_10.2p1, LibreSSL 3.3.6\\n' >&2; exit 0; fi\n\
+                 touch '{}'\n\
+                 exit 97\n",
+                provider_marker.display()
+            ),
+        )
+        .expect("fictional SSH fixture is written");
+        let mut permissions = fs::metadata(&ssh)
+            .expect("fixture metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&ssh, permissions).expect("fictional SSH fixture is executable");
+
+        fs::write(
+            config_directory.join("config.toml"),
+            "version = 1\n\
+             [contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n",
+        )
+        .expect("fictional SSH user config is written");
+
+        (bin_directory, provider_marker)
     }
 }
 

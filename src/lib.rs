@@ -7,6 +7,7 @@ mod doctor;
 mod domain;
 mod presentation;
 mod process_runner;
+mod ssh_readiness;
 
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
 pub use config::{ConfigFailure, ContextDefinition, ProjectBinding, UserConfig};
@@ -23,3 +24,4 @@ pub use domain::{
 pub use presentation::{ContextListReport, DoctorReport, PresentationFailure, StatusReport};
 pub use process_runner::SecureProcessRunner;
 pub use process_runner::{ProbeOutput, ProbePolicy, ProbeRunner};
+pub use ssh_readiness::{SshClientReadiness, SshClientReadinessCheck};

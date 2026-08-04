@@ -60,9 +60,10 @@ machine and already uses the providers' supported CLIs.
   - Google Cloud after the AWS vertical slice proves the Interface, with gcloud
     CLI configuration and Application Default Credentials treated as separate
     credential planes and observed independently.
-- Evidence-only feasibility notes for GitHub and SSH; neither enters 0.1 unless
-  Phase 0 demonstrates safe process-scoped identity selection without copying
-  credentials or mutating global provider state.
+- Evidence-only feasibility notes for GitHub. Empire AI enters 0.1 only through
+  bounded OpenSSH local readiness; it gains no remote status or execution
+  selection unless a later gate proves those behaviors without copying
+  credentials, executing user configuration, or mutating global state.
 - Human-readable terminal output and stable JSON output.
 - Secret-shaped config rejection and end-to-end redaction tests.
 
@@ -380,7 +381,12 @@ Deliverables:
 - [ ] Add the Google Cloud Provider Adapter with independent gcloud CLI and ADC
   observations for every declared credential plane. Merge the real adapter
   only after its disposable, network-denied probe-purity gate passes.
-- [ ] Keep GitHub and SSH evidence-only unless Phase 0 proves safe selection.
+- [x] Add a bounded OpenSSH client readiness Module as the first Empire AI
+  local-readiness slice; keep remote identity, MFA, authorization, expiry, and
+  execution selection explicitly unsupported.
+- [ ] Add user-owned Empire AI host and Expected Identity configuration, then
+  expose local readiness through `status` and `doctor` without evaluating SSH
+  configuration or contacting the cluster.
 - [ ] Refuse unsafe global switching by default.
 - [x] Add cross-context concurrency tests and hostile argument tests.
 

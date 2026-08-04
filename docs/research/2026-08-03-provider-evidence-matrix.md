@@ -42,8 +42,9 @@ Installed versions:
 | Google ADC | no command selected | none | ADC uses a separate search order and client libraries may refresh credentials; success in gcloud CLI says nothing about ADC | credential-file paths and principals can be sensitive | n/a | independent Phase 2 evidence surface |
 | GitHub CLI | `gh auth status --active --hostname HOST` with isolated `GH_CONFIG_DIR` | tested account authentication state | Reads the selected config and OS credential store, and contacts GitHub; update checks and telemetry must be disabled | hostname, username, scopes, storage location; never add `--show-token` | 5 s / 16 KiB | evidence-only until keyring fallback and Git helper isolation are proven |
 | GitHub active account mutation | `gh auth switch --hostname HOST --user USER` | none | Mutates active-account configuration | identity metadata | n/a | prohibited during status and exec |
+| OpenSSH installation | `ssh -V` | local executable and narrowly parsed version | Displays the client version and exits without a destination or remote connection | runtime library metadata is discarded after version parsing | 2 s / 4 KiB | implemented local-readiness check; no Session or identity claim |
 | SSH agent | `ssh-add -l -E sha256` with selected `SSH_AUTH_SOCK` | local key fingerprints | Reads agent state only; does not prove remote identity, authorization, MFA, or expiry | fingerprints and comments are sensitive metadata | 2 s / 16 KiB | local-readiness evidence only |
-| SSH configuration | `ssh -G -F FILE HOST` | effective local client configuration | Expands configuration without connecting; no Session evidence | usernames, hosts, paths, proxy commands | 2 s / 32 KiB | doctor-only, sanitize before reporting |
+| SSH configuration | `ssh -G -F FILE HOST` | effective local client configuration | Expands configuration without connecting, but evaluates `Match` blocks and `Match exec` can execute a command under the user's shell | usernames, hosts, paths, proxy commands | 2 s / 32 KiB | rejected for automated status and doctor |
 | Institutional SSH/MFA | no generic login or status command | none | Interactive remote authentication has no portable, inspectable future expiry | institution and username metadata | n/a | defer remote probe and expiry claims |
 
 ## Process-scoped selectors
@@ -116,4 +117,5 @@ a no-write provider mechanism is proven. ADR 0002 records this separation.
 - [GitHub CLI environment variables](https://cli.github.com/manual/gh_help_environment)
 - [GitHub CLI account switching](https://cli.github.com/manual/gh_auth_switch)
 - [OpenSSH `ssh-add`](https://man.openbsd.org/ssh-add.1)
+- [OpenSSH client](https://man.openbsd.org/ssh)
 - [OpenSSH client configuration](https://man.openbsd.org/ssh_config)

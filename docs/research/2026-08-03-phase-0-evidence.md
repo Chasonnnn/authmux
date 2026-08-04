@@ -101,14 +101,25 @@ Sources: [GitHub CLI environment](https://cli.github.com/manual/gh_help_environm
 
 ### SSH and institutional MFA
 
+`ssh -V` is the selected local-readiness probe. It exits after displaying the
+client version, so authmux can verify the installed OpenSSH client without a
+destination, provider contact, agent inspection, or SSH configuration
+evaluation. The implementation retains only a narrowly parsed version.
+
 `IdentityAgent` or `SSH_AUTH_SOCK` can select an agent, while `IdentitiesOnly`
 limits offered identities when paired with user-owned SSH configuration.
-`ssh -G` and agent inspection reveal local readiness only; they cannot prove
-remote identity, authorization, MFA state, or future expiry. Remote probes are
-therefore deferred. `GIT_SSH_COMMAND` is shell-interpreted by Git and conflicts
-with the argv-only invariant.
+Agent inspection reveals local readiness only; it cannot prove remote identity,
+authorization, MFA state, or future expiry. Remote probes are therefore
+deferred. `GIT_SSH_COMMAND` is shell-interpreted by Git and conflicts with the
+argv-only invariant.
 
-Sources: [OpenSSH client configuration](https://man.openbsd.org/ssh_config),
+`ssh -G` is excluded from automated status and doctor checks. Although it does
+not connect, it evaluates `Host` and `Match` blocks; OpenSSH documents that
+`Match exec` runs a command under the user's shell. Its expanded output also
+contains sensitive client metadata.
+
+Sources: [OpenSSH client](https://man.openbsd.org/ssh),
+[OpenSSH client configuration](https://man.openbsd.org/ssh_config),
 [Git environment variables](https://git-scm.com/docs/git),
 [Empire AI SSH guidance](https://docs.ccr.buffalo.edu/en/latest/howto/empireai/).
 

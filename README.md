@@ -104,6 +104,17 @@ cause the AWS CLI to refresh provider-owned SSO or login caches during the STS
 preflight, and removes its temporary authmux configuration. Captured provider
 output is not printed by the test.
 
+The GCP live gate remains local-only and never runs gcloud:
+
+```console
+AUTHMUX_LIVE_GCP_CONTEXT=crm \
+cargo test --test live_gcp -- --ignored --exact \
+  configured_gcp_context_completes_the_live_local_workflow
+```
+
+It verifies independent selection observations and doctor checks without
+claiming credential usability, refresh, authorization, or expiry.
+
 Empire AI work begins with an OpenSSH client readiness check that does not read
 SSH configuration, inspect an agent, resolve or contact a host, or trigger MFA.
 Run its opt-in local gate with:
@@ -185,6 +196,7 @@ Start here:
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions
 - [GCP Phase 2 contract](docs/research/2026-08-03-gcp-phase-2-contract.md) — separate gcloud/ADC planes and mandatory no-write gate
 - [Live AWS gate](docs/research/2026-08-03-live-aws-gate.md) — identifier-free evidence for the opt-in real-provider workflow
+- [Live GCP gate](docs/research/2026-08-03-live-gcp-gate.md) — local-only real-configuration observation
 
 ## License
 

@@ -66,8 +66,26 @@ impl ObservedIdentity {
         })
     }
 
+    pub(crate) fn provider_identity(value: impl Into<String>) -> Result<Self, DomainFailure> {
+        let value = required("observed provider identity", value.into())?;
+        if value.len() > 512
+            || value.chars().any(|character| {
+                character.is_control()
+                    || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+            })
+        {
+            return Err(DomainFailure::new("observed provider identity is invalid"));
+        }
+        Ok(Self { account: value })
+    }
+
     #[must_use]
     pub fn account(&self) -> &str {
+        &self.account
+    }
+
+    #[must_use]
+    pub fn value(&self) -> &str {
         &self.account
     }
 }
@@ -223,9 +241,9 @@ impl StatusObservation {
         self.evidence_level
     }
 
-    pub(crate) fn compare_to(mut self, expected_account: &str) -> Self {
+    pub(crate) fn compare_to(mut self, expected_identity: &str) -> Self {
         self.identity_match = match &self.observed_identity {
-            Some(observed) if observed.account() == expected_account => IdentityMatch::Match,
+            Some(observed) if observed.value() == expected_identity => IdentityMatch::Match,
             Some(_) => IdentityMatch::Mismatch,
             None => IdentityMatch::Unverified,
         };

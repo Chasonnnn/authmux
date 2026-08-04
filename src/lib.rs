@@ -5,6 +5,8 @@ mod config;
 mod context_engine;
 mod doctor;
 mod domain;
+#[cfg(unix)]
+mod gcp_status;
 mod presentation;
 mod process_runner;
 mod ssh_readiness;
@@ -26,6 +28,8 @@ pub use domain::{
     ExecutionOutcome, ExecutionSelection, IdentityMatch, ObservationReason, ObservedIdentity,
     ProviderFailure, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
+#[cfg(unix)]
+pub use gcp_status::{GcpCredentialPlane, GcpLocalStatus, GcpPlaneObservation, GcpProjectMatch};
 pub use presentation::{ContextListReport, DoctorReport, PresentationFailure, StatusReport};
 pub use process_runner::SecureProcessRunner;
 pub use process_runner::{ProbeOutput, ProbePolicy, ProbeRunner};

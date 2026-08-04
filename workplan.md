@@ -322,6 +322,9 @@ Deliverables:
   external AWS session-tool integration in 0.1.
 - [x] Execute the opt-in live AWS gate for one user-owned profile without
   retaining provider identifiers or raw output.
+- [x] Execute the opt-in interactive recovery gate for a console-login profile
+  and a role profile that uses it as `source_profile`; both guarded executions
+  passed, while distinct-account and multi-organization coverage remain open.
 - [x] Compare the fictional AWS mismatch workflow against Atmos and against a
   `direnv` plus native-CLI control, using Granted for AWS where it is already
   configured; record versioned build-vs-adopt evidence.

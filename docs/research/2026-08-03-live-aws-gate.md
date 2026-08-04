@@ -49,3 +49,18 @@ never the identifiers themselves.
 The native browser flow inherits the terminal and bypasses test output capture.
 Provider names, account identifiers, authorization URLs, codes, and cache
 contents are never written to this repository.
+
+### 2026-08-04 result
+
+The two-profile interactive recovery gate passed on macOS with AWS CLI
+`2.36.11`. The first profile used AWS console-login Reauthentication. The
+second selected a role whose declared source was the first profile. Both
+contexts passed local `doctor`, local-metadata `status` without a mismatch, and
+provider-validating guarded execution after the login completed.
+
+The two provider-validated Expected Identities were equal. This run therefore
+proves two-profile direct-versus-role selection and source-session recovery,
+but not distinct-account or multi-organization isolation. The real names,
+identifiers, role ARN, browser authorization data, native output, and cache
+contents are not retained in the repository. The temporary two-context test
+configuration was removed by the gate.

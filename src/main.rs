@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process;
 
@@ -13,7 +14,8 @@ use nix::unistd::Pid;
 use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
     ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
-    ProjectBinding, SecureProcessRunner, SshDoctor, StatusEngine, StatusReport, UserConfig,
+    ExecutionSelection, ProcessRunner, ProjectBinding, SecureProcessRunner, SshDoctor,
+    StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -26,6 +28,10 @@ fn run() -> i32 {
         Ok(CliCommand::ContextShow { selection }) => show_context(selection),
         Ok(CliCommand::ContextList { format }) => show_context_list(format),
         Ok(CliCommand::Status { selection, format }) => show_status(selection, format),
+        Ok(CliCommand::Login {
+            selection,
+            provider,
+        }) => login(selection, provider),
         Ok(CliCommand::Doctor {
             selection,
             provider,
@@ -34,6 +40,103 @@ fn run() -> i32 {
         Err(message) => {
             eprintln!("{message}");
             2
+        }
+    }
+}
+
+fn login(selection: ContextSelection, provider: Option<ProviderSelection>) -> i32 {
+    let selection = match resolve_selection(selection) {
+        Ok(selection) => selection,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let (config, _) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let definition = match config.resolve_context_definition(&selection.context_name) {
+        Ok(definition) => definition,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    let provider = match resolve_login_provider(&definition, provider) {
+        Ok(provider) => provider,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+
+    match provider {
+        ProviderSelection::Aws => {
+            eprintln!("AWS login is not implemented yet");
+            2
+        }
+        ProviderSelection::Ssh => login_ssh(&definition),
+    }
+}
+
+fn login_ssh(definition: &ContextDefinition) -> i32 {
+    let Some(profile) = definition.ssh() else {
+        eprintln!("SSH Provider Profile is not configured");
+        return 2;
+    };
+    let command = match CommandSpec::new("ssh", [profile.host_alias()]) {
+        Ok(command) => command,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+
+    println!("login: {}", definition.name());
+    println!("provider: ssh");
+    println!("host alias: {}", profile.host_alias());
+    println!(
+        "expected remote principal: {}",
+        profile.expected_remote_principal()
+    );
+    println!("native command: ssh {}", profile.host_alias());
+    if let Err(error) = std::io::stdout().flush() {
+        eprintln!("could not display SSH login preview ({})", error.kind());
+        return 5;
+    }
+
+    let runner = match SecureProcessRunner::for_authmux() {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    match runner.run(&command, &ExecutionSelection::none()) {
+        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
+            (Some(0), None) => {
+                println!(
+                    "result: native login command exited successfully; remote session usability remains unverified"
+                );
+                0
+            }
+            (Some(code), None) => {
+                eprintln!("native SSH login command exited with status {code}");
+                code
+            }
+            (None, Some(signal)) => terminate_with_signal(signal),
+            _ => {
+                eprintln!("native SSH login command ended without an exit code or signal");
+                5
+            }
+        },
+        Err(failure) => {
+            eprintln!("{failure}");
+            exit_code(&failure)
         }
     }
 }
@@ -290,6 +393,31 @@ fn resolve_doctor_provider(
     }
 }
 
+fn resolve_login_provider(
+    definition: &ContextDefinition,
+    requested: Option<ProviderSelection>,
+) -> Result<ProviderSelection, String> {
+    if let Some(provider) = requested {
+        let configured = match provider {
+            ProviderSelection::Aws => definition.aws().is_some(),
+            ProviderSelection::Ssh => definition.ssh().is_some(),
+        };
+        return configured.then_some(provider).ok_or_else(|| {
+            "requested authentication context does not define the selected provider".to_owned()
+        });
+    }
+
+    match (definition.aws().is_some(), definition.ssh().is_some()) {
+        (true, false) => Ok(ProviderSelection::Aws),
+        (false, true) => Ok(ProviderSelection::Ssh),
+        (true, true) => Err(
+            "login requires --provider when the authentication context defines multiple providers"
+                .to_owned(),
+        ),
+        (false, false) => Err("authentication context does not define a provider".to_owned()),
+    }
+}
+
 fn diagnose_provider(
     definition: &ContextDefinition,
     provider: ProviderSelection,
@@ -398,6 +526,10 @@ enum CliCommand {
         selection: ContextSelection,
         format: ReportFormat,
     },
+    Login {
+        selection: ContextSelection,
+        provider: Option<ProviderSelection>,
+    },
     Doctor {
         selection: ContextSelection,
         provider: Option<ProviderSelection>,
@@ -449,6 +581,10 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
         Some("context") => parse_context_command(&arguments),
         Some("status") => parse_status(&arguments)
             .map(|(selection, format)| CliCommand::Status { selection, format }),
+        Some("login") => parse_login(&arguments).map(|(selection, provider)| CliCommand::Login {
+            selection,
+            provider,
+        }),
         Some("doctor") => {
             parse_doctor(&arguments).map(|(selection, provider, format)| CliCommand::Doctor {
                 selection,
@@ -456,8 +592,34 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
                 format,
             })
         }
-        _ => Err("usage: authmux <exec|context|doctor|status> ...".to_owned()),
+        _ => Err("usage: authmux <exec|context|doctor|login|status> ...".to_owned()),
     }
+}
+
+fn parse_login(
+    arguments: &[OsString],
+) -> Result<(ContextSelection, Option<ProviderSelection>), String> {
+    const USAGE: &str = "usage: authmux login <context> [--provider <aws|ssh>]";
+    let context_name = arguments
+        .get(1)
+        .and_then(|argument| argument.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| USAGE.to_owned())?
+        .to_owned();
+
+    let provider = match arguments.len() {
+        2 => None,
+        4 if arguments.get(2).and_then(|argument| argument.to_str()) == Some("--provider") => {
+            match arguments.get(3).and_then(|argument| argument.to_str()) {
+                Some("aws") => Some(ProviderSelection::Aws),
+                Some("ssh") => Some(ProviderSelection::Ssh),
+                _ => return Err(USAGE.to_owned()),
+            }
+        }
+        _ => return Err(USAGE.to_owned()),
+    };
+
+    Ok((ContextSelection::Explicit(context_name), provider))
 }
 
 fn parse_context_command(arguments: &[OsString]) -> Result<CliCommand, String> {

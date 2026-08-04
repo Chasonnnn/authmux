@@ -60,10 +60,11 @@ machine and already uses the providers' supported CLIs.
   - Google Cloud after the AWS vertical slice proves the Interface, with gcloud
     CLI configuration and Application Default Credentials treated as separate
     credential planes and observed independently.
-- Evidence-only feasibility notes for GitHub. Empire AI enters 0.1 only through
-  bounded OpenSSH local readiness; it gains no remote status or execution
-  selection unless a later gate proves those behaviors without copying
-  credentials, executing user configuration, or mutating global state.
+- Evidence-only feasibility notes for GitHub. Empire AI enters 0.1 through
+  bounded OpenSSH local readiness and explicit native SSH login delegation; it
+  gains no remote status or execution selection unless a later gate proves
+  those behaviors without copying credentials, executing user configuration
+  from a read-only command, or mutating global state.
 - Human-readable terminal output and stable JSON output.
 - Secret-shaped config rejection and end-to-end redaction tests.
 
@@ -75,7 +76,8 @@ machine and already uses the providers' supported CLIs.
   keychains.
 - Background refresh, a daemon, cloud synchronization, team RBAC, approval
   workflows, a GUI, or a hosted control plane.
-- SSH certificate issuance or a general-purpose SSH connection manager.
+- SSH certificate issuance or a general-purpose SSH connection manager;
+  user-owned OpenSSH multiplexing may be used by explicit native login.
 - GitHub or SSH execution selection without a provider-supported,
   process-scoped mechanism.
 - `shell`, generic logout or revocation, automatic identity discovery, external
@@ -134,7 +136,8 @@ Behavioral rules:
   not contact their providers. A mixed-provider context requires an explicit
   `--provider`. Warnings exit `0`; failed checks exit `1`.
 - `login` shows exactly which Provider Profile will be affected and delegates
-  to its native flow.
+  to its native flow. SSH login evaluates user-owned OpenSSH configuration only
+  after this preview; authmux neither configures nor promises connection reuse.
 - `exec` resolves one context, builds a minimal child environment, and uses an
   argument vector. It forwards the child's exit code and signals.
 - `--json` has a versioned schema and contains sanitized structured data only.
@@ -394,6 +397,10 @@ Deliverables:
 - [x] Expose OpenSSH readiness through provider-scoped `doctor` without
   evaluating SSH configuration or contacting the cluster; keep `status` and
   `exec` unsupported until stronger evidence and a safe Execution Scope exist.
+- [x] Delegate explicit SSH login to `ssh HOST_ALIAS` with terminal passthrough,
+  filtered environment inheritance, and no capture of MFA input or native
+  output; leave `ControlMaster` and `ControlPersist` under user-owned OpenSSH
+  configuration per ADR 0004.
 - [ ] Refuse unsafe global switching by default.
 - [x] Add cross-context concurrency tests and hostile argument tests.
 
@@ -412,9 +419,11 @@ Exit criteria:
 
 Deliverables:
 
-- [ ] Implement `login` plans for initial providers.
-- [ ] Preview the affected Provider Profile and native command before mutation.
-- [ ] Support interactive terminal handoff without capturing secrets.
+- [ ] Implement `login` plans for all initial providers; SSH is implemented and
+  AWS remains.
+- [x] Preview the affected SSH Provider Profile and native command before
+  mutation.
+- [x] Support SSH interactive terminal handoff without capturing secrets.
 - [ ] Re-observe status after successful login and display evidence.
 - [ ] Handle cancellation, timeout, native failure, and partial multi-provider
   completion without silent retry.

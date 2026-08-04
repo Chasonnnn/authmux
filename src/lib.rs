@@ -13,7 +13,8 @@ mod ssh_transport_status;
 
 pub use aws_adapter::{AwsAdapter, AwsLocalMetadataAdapter};
 pub use config::{
-    ConfigFailure, ContextDefinition, ProjectBinding, SshProviderDefinition, UserConfig,
+    ConfigFailure, ContextDefinition, GcloudProviderDefinition, GcpAdcProviderDefinition,
+    GcpProviderDefinition, ProjectBinding, SshProviderDefinition, UserConfig,
 };
 pub use context_engine::{
     ContextEngine, ExecutionContextResolver, ProcessRunner, ProviderAdapter, StatusAdapter,

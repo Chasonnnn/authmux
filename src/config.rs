@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{AuthenticationContext, DomainFailure};
+use crate::{AuthenticationContext, DomainFailure, ExecutionSelection};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +27,7 @@ struct ContextConfig {
 struct ProviderConfigs {
     aws: Option<AwsConfig>,
     ssh: Option<SshConfig>,
+    gcp: Option<GcpConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +43,37 @@ struct SshConfig {
     host_alias: String,
     expected_remote_principal: String,
     control_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GcpConfig {
+    gcloud: Option<GcloudConfig>,
+    adc: Option<GcpAdcConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GcloudConfig {
+    config_dir: PathBuf,
+    configuration: String,
+    expected_principal: String,
+    expected_source_account: Option<String>,
+    expected_project: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GcpAdcConfig {
+    mode: GcpAdcMode,
+    credential_file: PathBuf,
+    expected_principal: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum GcpAdcMode {
+    CredentialFile,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +100,7 @@ pub struct ContextDefinition {
     name: String,
     aws: Option<AuthenticationContext>,
     ssh: Option<SshProviderDefinition>,
+    gcp: Option<GcpProviderDefinition>,
     description: Option<String>,
 }
 
@@ -76,6 +109,27 @@ pub struct SshProviderDefinition {
     host_alias: String,
     expected_remote_principal: String,
     control_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GcpProviderDefinition {
+    gcloud: Option<GcloudProviderDefinition>,
+    adc: Option<GcpAdcProviderDefinition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GcloudProviderDefinition {
+    config_dir: PathBuf,
+    configuration: String,
+    expected_principal: String,
+    expected_source_account: Option<String>,
+    expected_project: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GcpAdcProviderDefinition {
+    credential_file: PathBuf,
+    expected_principal: String,
 }
 
 impl ContextDefinition {
@@ -95,8 +149,95 @@ impl ContextDefinition {
     }
 
     #[must_use]
+    pub fn gcp(&self) -> Option<&GcpProviderDefinition> {
+        self.gcp.as_ref()
+    }
+
+    #[must_use]
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
+    }
+}
+
+impl GcpProviderDefinition {
+    #[must_use]
+    pub fn gcloud(&self) -> Option<&GcloudProviderDefinition> {
+        self.gcloud.as_ref()
+    }
+
+    #[must_use]
+    pub fn adc(&self) -> Option<&GcpAdcProviderDefinition> {
+        self.adc.as_ref()
+    }
+
+    #[must_use]
+    pub fn execution_selection(&self) -> ExecutionSelection {
+        let mut environment = Vec::new();
+        if let Some(gcloud) = &self.gcloud {
+            environment.extend([
+                (
+                    "CLOUDSDK_CONFIG".into(),
+                    gcloud.config_dir.as_os_str().to_owned(),
+                ),
+                (
+                    "CLOUDSDK_ACTIVE_CONFIG_NAME".into(),
+                    gcloud.configuration.clone().into(),
+                ),
+                ("CLOUDSDK_CORE_DISABLE_PROMPTS".into(), "1".into()),
+                ("CLOUDSDK_CORE_DISABLE_FILE_LOGGING".into(), "1".into()),
+                ("CLOUDSDK_CORE_DISABLE_USAGE_REPORTING".into(), "1".into()),
+                (
+                    "CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK".into(),
+                    "1".into(),
+                ),
+            ]);
+        }
+        if let Some(adc) = &self.adc {
+            environment.push((
+                "GOOGLE_APPLICATION_CREDENTIALS".into(),
+                adc.credential_file.as_os_str().to_owned(),
+            ));
+        }
+        ExecutionSelection::from_environment(environment)
+    }
+}
+
+impl GcloudProviderDefinition {
+    #[must_use]
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
+    #[must_use]
+    pub fn configuration(&self) -> &str {
+        &self.configuration
+    }
+
+    #[must_use]
+    pub fn expected_principal(&self) -> &str {
+        &self.expected_principal
+    }
+
+    #[must_use]
+    pub fn expected_source_account(&self) -> Option<&str> {
+        self.expected_source_account.as_deref()
+    }
+
+    #[must_use]
+    pub fn expected_project(&self) -> Option<&str> {
+        self.expected_project.as_deref()
+    }
+}
+
+impl GcpAdcProviderDefinition {
+    #[must_use]
+    pub fn credential_file(&self) -> &Path {
+        &self.credential_file
+    }
+
+    #[must_use]
+    pub fn expected_principal(&self) -> &str {
+        &self.expected_principal
     }
 }
 
@@ -299,7 +440,10 @@ impl UserConfig {
             .get(context_name)
             .ok_or_else(|| ConfigFailure::new("requested authentication context is not defined"))?;
 
-        if context.providers.aws.is_none() && context.providers.ssh.is_none() {
+        if context.providers.aws.is_none()
+            && context.providers.ssh.is_none()
+            && context.providers.gcp.is_none()
+        {
             return Err(ConfigFailure::new(
                 "authentication context must define at least one provider",
             ));
@@ -323,11 +467,32 @@ impl UserConfig {
                 expected_remote_principal: ssh.expected_remote_principal.clone(),
                 control_path: ssh.control_path.clone(),
             });
+        let gcp = context
+            .providers
+            .gcp
+            .as_ref()
+            .map(|gcp| GcpProviderDefinition {
+                gcloud: gcp.gcloud.as_ref().map(|gcloud| GcloudProviderDefinition {
+                    config_dir: gcloud.config_dir.clone(),
+                    configuration: gcloud.configuration.clone(),
+                    expected_principal: gcloud.expected_principal.clone(),
+                    expected_source_account: gcloud.expected_source_account.clone(),
+                    expected_project: gcloud.expected_project.clone(),
+                }),
+                adc: gcp.adc.as_ref().map(|adc| {
+                    let GcpAdcMode::CredentialFile = adc.mode;
+                    GcpAdcProviderDefinition {
+                        credential_file: adc.credential_file.clone(),
+                        expected_principal: adc.expected_principal.clone(),
+                    }
+                }),
+            });
 
         Ok(ContextDefinition {
             name: context_name.to_owned(),
             aws,
             ssh,
+            gcp,
             description: context.description.clone(),
         })
     }
@@ -424,7 +589,140 @@ fn ssh_control_path_looks_secret_shaped(path: &Path) -> bool {
     })
 }
 
+fn valid_gcp_provider_path(path: &Path) -> bool {
+    path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+        && path
+            .to_str()
+            .is_some_and(|value| !has_unsafe_display_characters(value))
+}
+
+fn valid_gcloud_configuration_name(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    value.len() <= 128
+        && bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn gcp_provider_path_looks_secret_shaped(path: &Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(value) = component else {
+            return false;
+        };
+        value.to_str().is_some_and(looks_secret_shaped)
+    })
+}
+
+fn valid_gcp_expected_identity(value: &str) -> bool {
+    !value.is_empty()
+        && value.trim() == value
+        && !has_unsafe_display_characters(value)
+        && value.len() <= 512
+}
+
+fn validate_gcp_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .gcp
+            .as_ref()
+            .is_some_and(|gcp| gcp.gcloud.is_none() && gcp.adc.is_none())
+    }) {
+        return Err(ConfigFailure::new(
+            "GCP Provider Profile must define at least one credential plane",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context.providers.gcp.as_ref().is_some_and(|gcp| {
+            gcp.gcloud.as_ref().is_some_and(|gcloud| {
+                looks_secret_shaped(&gcloud.expected_principal)
+                    || gcloud
+                        .expected_source_account
+                        .as_deref()
+                        .is_some_and(looks_secret_shaped)
+                    || gcloud
+                        .expected_project
+                        .as_deref()
+                        .is_some_and(looks_secret_shaped)
+                    || gcp_provider_path_looks_secret_shaped(&gcloud.config_dir)
+            }) || gcp.adc.as_ref().is_some_and(|adc| {
+                looks_secret_shaped(&adc.expected_principal)
+                    || gcp_provider_path_looks_secret_shaped(&adc.credential_file)
+            })
+        })
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains secret-shaped GCP metadata",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context.providers.gcp.as_ref().is_some_and(|gcp| {
+            gcp.gcloud.as_ref().is_some_and(|gcloud| {
+                !valid_gcp_expected_identity(&gcloud.expected_principal)
+                    || gcloud
+                        .expected_source_account
+                        .as_deref()
+                        .is_some_and(|value| !valid_gcp_expected_identity(value))
+            }) || gcp
+                .adc
+                .as_ref()
+                .is_some_and(|adc| !valid_gcp_expected_identity(&adc.expected_principal))
+        })
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid GCP Expected Identity",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .gcp
+            .as_ref()
+            .and_then(|gcp| gcp.gcloud.as_ref())
+            .and_then(|gcloud| gcloud.expected_project.as_deref())
+            .is_some_and(|value| !valid_gcp_expected_identity(value))
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid GCP expected project",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context.providers.gcp.as_ref().is_some_and(|gcp| {
+            gcp.gcloud
+                .as_ref()
+                .is_some_and(|gcloud| !valid_gcp_provider_path(&gcloud.config_dir))
+                || gcp
+                    .adc
+                    .as_ref()
+                    .is_some_and(|adc| !valid_gcp_provider_path(&adc.credential_file))
+        })
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid GCP provider path",
+        ));
+    }
+    if config.contexts.values().any(|context| {
+        context
+            .providers
+            .gcp
+            .as_ref()
+            .and_then(|gcp| gcp.gcloud.as_ref())
+            .is_some_and(|gcloud| !valid_gcloud_configuration_name(&gcloud.configuration))
+    }) {
+        return Err(ConfigFailure::new(
+            "user configuration contains an invalid gcloud configuration name",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
+    validate_gcp_provider_configs(config)?;
     if config.contexts.values().any(|context| {
         context
             .providers
@@ -500,11 +798,11 @@ fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
             "user configuration contains an invalid SSH Expected Identity",
         ));
     }
-    if config
-        .contexts
-        .values()
-        .any(|context| context.providers.aws.is_none() && context.providers.ssh.is_none())
-    {
+    if config.contexts.values().any(|context| {
+        context.providers.aws.is_none()
+            && context.providers.ssh.is_none()
+            && context.providers.gcp.is_none()
+    }) {
         return Err(ConfigFailure::new(
             "authentication context must define at least one provider",
         ));

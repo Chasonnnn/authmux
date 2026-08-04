@@ -119,6 +119,189 @@ fn ssh_only_context_resolves_user_owned_intent_metadata() {
 }
 
 #[test]
+fn gcp_context_resolves_gcloud_and_adc_planes_independently() {
+    let source = "version = 1\n\
+                  [contexts.crm.providers.gcp.gcloud]\n\
+                  config_dir = \"/home/researcher/.config/gcloud\"\n\
+                  configuration = \"crm-research\"\n\
+                  expected_principal = \"researcher@example.test\"\n\
+                  expected_source_account = \"researcher@example.test\"\n\
+                  expected_project = \"fictional-project\"\n\
+                  [contexts.crm.providers.gcp.adc]\n\
+                  mode = \"credential_file\"\n\
+                  credential_file = \"/home/researcher/.config/gcloud/adc/crm.json\"\n\
+                  expected_principal = \"workload@example.test\"\n";
+
+    let config = UserConfig::parse(source).expect("GCP selection metadata is valid");
+    let definition = config
+        .resolve_context_definition("crm")
+        .expect("GCP-only context resolves");
+    let gcp = definition.gcp().expect("GCP Provider Profile is available");
+    let gcloud = gcp.gcloud().expect("gcloud CLI plane is available");
+    let adc = gcp.adc().expect("ADC plane is available");
+
+    assert!(definition.aws().is_none());
+    assert!(definition.ssh().is_none());
+    assert_eq!(
+        gcloud.config_dir(),
+        Path::new("/home/researcher/.config/gcloud")
+    );
+    assert_eq!(gcloud.configuration(), "crm-research");
+    assert_eq!(gcloud.expected_principal(), "researcher@example.test");
+    assert_eq!(
+        gcloud.expected_source_account(),
+        Some("researcher@example.test")
+    );
+    assert_eq!(gcloud.expected_project(), Some("fictional-project"));
+    assert_eq!(
+        adc.credential_file(),
+        Path::new("/home/researcher/.config/gcloud/adc/crm.json")
+    );
+    assert_eq!(adc.expected_principal(), "workload@example.test");
+}
+
+#[test]
+fn gcp_context_requires_at_least_one_declared_credential_plane() {
+    let source = "version = 1\n[contexts.crm.providers.gcp]\n";
+
+    let failure = UserConfig::parse(source).expect_err("an empty GCP provider is invalid");
+
+    assert_eq!(
+        failure.to_string(),
+        "GCP Provider Profile must define at least one credential plane"
+    );
+}
+
+#[test]
+fn relative_gcp_provider_paths_are_rejected_without_echoing_them() {
+    let cases = [
+        (
+            "../fictional-sensitive/gcloud",
+            "version = 1\n\
+             [contexts.crm.providers.gcp.gcloud]\n\
+             config_dir = \"../fictional-sensitive/gcloud\"\n\
+             configuration = \"crm\"\n\
+             expected_principal = \"researcher@example.test\"\n",
+        ),
+        (
+            "../fictional-sensitive/adc.json",
+            "version = 1\n\
+             [contexts.crm.providers.gcp.adc]\n\
+             mode = \"credential_file\"\n\
+             credential_file = \"../fictional-sensitive/adc.json\"\n\
+             expected_principal = \"workload@example.test\"\n",
+        ),
+    ];
+
+    for (seeded_path, source) in cases {
+        let failure = UserConfig::parse(source).expect_err("relative GCP paths are invalid");
+        let diagnostic = failure.to_string();
+
+        assert_eq!(
+            diagnostic,
+            "user configuration contains an invalid GCP provider path"
+        );
+        assert!(!diagnostic.contains(seeded_path));
+    }
+}
+
+#[test]
+fn invalid_gcloud_configuration_names_are_rejected_without_echoing_them() {
+    for seeded_name in ["NONE", "9crm", "crm_research", "crm/escape"] {
+        let source = format!(
+            "version = 1\n\
+             [contexts.crm.providers.gcp.gcloud]\n\
+             config_dir = \"/home/researcher/.config/gcloud\"\n\
+             configuration = \"{seeded_name}\"\n\
+             expected_principal = \"researcher@example.test\"\n"
+        );
+
+        let failure =
+            UserConfig::parse(&source).expect_err("unsafe configuration names are invalid");
+        let diagnostic = failure.to_string();
+
+        assert_eq!(
+            diagnostic,
+            "user configuration contains an invalid gcloud configuration name"
+        );
+        assert!(!diagnostic.contains(seeded_name));
+    }
+}
+
+#[test]
+fn secret_shaped_gcp_metadata_is_rejected_without_echoing_it() {
+    let seeded_secret = "ghp_fictional_gcp_value";
+    let sources = [
+        format!(
+            "version = 1\n\
+             [contexts.crm.providers.gcp.gcloud]\n\
+             config_dir = \"/home/researcher/.config/gcloud\"\n\
+             configuration = \"crm\"\n\
+             expected_principal = \"{seeded_secret}\"\n"
+        ),
+        format!(
+            "version = 1\n\
+             [contexts.crm.providers.gcp.adc]\n\
+             mode = \"credential_file\"\n\
+             credential_file = \"/home/researcher/.config/{seeded_secret}/adc.json\"\n\
+             expected_principal = \"workload@example.test\"\n"
+        ),
+    ];
+
+    for source in sources {
+        let failure = UserConfig::parse(&source).expect_err("secret-shaped GCP data is invalid");
+        let diagnostic = failure.to_string();
+
+        assert_eq!(
+            diagnostic,
+            "user configuration contains secret-shaped GCP metadata"
+        );
+        assert!(!diagnostic.contains(seeded_secret));
+    }
+}
+
+#[test]
+fn blank_or_padded_gcp_expected_identities_are_rejected() {
+    let sources = [
+        "version = 1\n\
+         [contexts.crm.providers.gcp.gcloud]\n\
+         config_dir = \"/home/researcher/.config/gcloud\"\n\
+         configuration = \"crm\"\n\
+         expected_principal = \" researcher@example.test \"\n",
+        "version = 1\n\
+         [contexts.crm.providers.gcp.adc]\n\
+         mode = \"credential_file\"\n\
+         credential_file = \"/home/researcher/.config/gcloud/adc/crm.json\"\n\
+         expected_principal = \"\"\n",
+    ];
+
+    for source in sources {
+        let failure = UserConfig::parse(source).expect_err("invalid GCP identities are rejected");
+        assert_eq!(
+            failure.to_string(),
+            "user configuration contains an invalid GCP Expected Identity"
+        );
+    }
+}
+
+#[test]
+fn blank_or_padded_gcp_expected_project_is_rejected() {
+    let source = "version = 1\n\
+                  [contexts.crm.providers.gcp.gcloud]\n\
+                  config_dir = \"/home/researcher/.config/gcloud\"\n\
+                  configuration = \"crm\"\n\
+                  expected_principal = \"researcher@example.test\"\n\
+                  expected_project = \" fictional-project \"\n";
+
+    let failure = UserConfig::parse(source).expect_err("invalid GCP projects are rejected");
+
+    assert_eq!(
+        failure.to_string(),
+        "user configuration contains an invalid GCP expected project"
+    );
+}
+
+#[test]
 fn option_shaped_ssh_host_alias_is_rejected_without_echoing_it() {
     let seeded_alias = "-oProxyCommand=fictional-sensitive-command";
     let source = format!(

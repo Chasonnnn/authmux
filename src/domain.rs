@@ -292,6 +292,10 @@ impl ExecutionSelection {
         }
     }
 
+    pub(crate) fn from_environment(environment: Vec<(OsString, OsString)>) -> Self {
+        Self { environment }
+    }
+
     #[must_use]
     pub fn environment(&self) -> &[(OsString, OsString)] {
         &self.environment

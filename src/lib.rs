@@ -6,6 +6,8 @@ mod context_engine;
 mod doctor;
 mod domain;
 #[cfg(unix)]
+mod gcp_exec;
+#[cfg(unix)]
 mod gcp_status;
 mod presentation;
 mod process_runner;
@@ -30,6 +32,8 @@ pub use domain::{
     ExecutionOutcome, ExecutionSelection, IdentityMatch, ObservationReason, ObservedIdentity,
     ProviderFailure, ReauthenticationNeed, SessionUsability, StatusObservation,
 };
+#[cfg(unix)]
+pub use gcp_exec::{GcpExecutionFailure, GcpExecutionGuard};
 #[cfg(unix)]
 pub use gcp_status::{GcpCredentialPlane, GcpLocalStatus, GcpPlaneObservation, GcpProjectMatch};
 pub use presentation::{ContextListReport, DoctorReport, PresentationFailure, StatusReport};

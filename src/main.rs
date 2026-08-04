@@ -14,8 +14,9 @@ use nix::unistd::Pid;
 use authmux::{
     AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, CommandSpec, ContextDefinition, ContextEngine,
     ContextListReport, DoctorOutcome, DoctorReport, ExecutionContextResolver, ExecutionFailure,
-    ExecutionSelection, GcpDoctor, GcpLocalStatus, ProcessRunner, ProjectBinding,
-    SecureProcessRunner, SshDoctor, SshTransportStatus, StatusEngine, StatusReport, UserConfig,
+    ExecutionSelection, GcpDoctor, GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus,
+    ProcessRunner, ProjectBinding, SecureProcessRunner, SshDoctor, SshTransportStatus,
+    StatusEngine, StatusReport, UserConfig,
 };
 
 fn main() {
@@ -150,6 +151,46 @@ fn login_ssh(definition: &ContextDefinition) -> i32 {
 }
 
 fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
+    let resolved = match resolve_selection(selection.clone()) {
+        Ok(selection) => selection,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let (config, _) = match load_user_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let definition = match config.resolve_context_definition(&resolved.context_name) {
+        Ok(definition) => definition,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+
+    match (definition.aws(), definition.gcp(), definition.ssh()) {
+        (Some(_), None, _) => execute_aws(selection, command),
+        (None, Some(profile), None) => execute_gcp(selection, &definition, profile, command),
+        (_, Some(_), _) => {
+            let failure = GcpExecutionFailure::UnsupportedProviderComposition;
+            eprintln!("{failure}");
+            failure.exit_code()
+        }
+        _ => {
+            eprintln!(
+                "requested authentication context does not define AWS required by this command"
+            );
+            2
+        }
+    }
+}
+
+fn execute_aws(selection: ContextSelection, command: &CommandSpec) -> i32 {
     let current_resolver = CliExecutionContextResolver {
         selection: selection.clone(),
     };
@@ -202,6 +243,72 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
             exit_code(&failure)
         }
     }
+}
+
+fn execute_gcp(
+    selection: ContextSelection,
+    definition: &ContextDefinition,
+    profile: &authmux::GcpProviderDefinition,
+    command: &CommandSpec,
+) -> i32 {
+    let Some(home) = env::var_os("HOME") else {
+        eprintln!(
+            "refusing child execution: user home is unavailable for protected GCP observation"
+        );
+        return 4;
+    };
+    let Ok(observations) = GcpLocalStatus::new(PathBuf::from(home)).observe(profile) else {
+        eprintln!("refusing child execution: protected GCP selection could not be observed safely");
+        return 5;
+    };
+    let execution_selection = match GcpExecutionGuard::authorize(profile, &observations, command) {
+        Ok(selection) => selection,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return failure.exit_code();
+        }
+    };
+
+    let Ok(current_selection) = resolve_selection(selection) else {
+        return refuse_changed_context();
+    };
+    let Ok((current_config, _)) = load_user_config() else {
+        return refuse_changed_context();
+    };
+    let Ok(current_definition) =
+        current_config.resolve_context_definition(&current_selection.context_name)
+    else {
+        return refuse_changed_context();
+    };
+    if let Err(failure) = GcpExecutionGuard::ensure_unchanged(definition, &current_definition) {
+        eprintln!("{failure}");
+        return failure.exit_code();
+    }
+
+    let runner = match SecureProcessRunner::for_authmux() {
+        Ok(runner) => runner,
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 2;
+        }
+    };
+    match runner.run(command, &execution_selection) {
+        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
+            (Some(exit_code), None) => exit_code,
+            (None, Some(signal)) => terminate_with_signal(signal),
+            _ => 126,
+        },
+        Err(failure) => {
+            eprintln!("{failure}");
+            exit_code(&failure)
+        }
+    }
+}
+
+fn refuse_changed_context() -> i32 {
+    let failure = ExecutionFailure::ContextChanged;
+    eprintln!("{failure}");
+    exit_code(&failure)
 }
 
 fn show_context(selection: ContextSelection) -> i32 {

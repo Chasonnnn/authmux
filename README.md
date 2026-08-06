@@ -38,6 +38,18 @@ authmux status --context crm
 authmux status --context crm --json
 ```
 
+Inspect every configured provider from any directory:
+
+```console
+authmux status --all
+authmux status --all --json
+```
+
+The aggregate command does not require a repository Project Binding. It keeps
+successful observations when another provider fails and exits nonzero so an
+agent can fail closed. Its JSON output follows the checked-in
+[`status-all-v1` schema](docs/schemas/status-all-v1.schema.json).
+
 This status can detect whether an IAM Identity Center profile's configured
 account or an AWS login profile's `login_session` account matches the Expected
 Identity. It retains only the account segment of supported AWS ARNs. It always
@@ -55,6 +67,30 @@ Console-login profiles use `aws login`; IAM Identity Center profiles use
 target account and reauthenticates its declared source profile. The preview
 shows both profile selectors before the terminal-attached native command runs.
 Native success does not by itself claim live Session Usability.
+
+GitHub uses a user-owned native configuration directory and the system
+credential store:
+
+```toml
+[contexts.github.providers.github]
+config_dir = "/home/researcher/.config/gh/research"
+hostname = "github.com"
+expected_login = "fictional-researcher"
+```
+
+```console
+authmux status --context github --provider github
+authmux doctor --context github --provider github
+authmux login github --provider github
+authmux exec --context github -- gh pr list
+```
+
+Status contacts GitHub through `gh auth status` without requesting or printing
+a token. Guarded execution validates the active login, then applies
+`GH_CONFIG_DIR` and `GH_HOST` only to the child. Ambient GitHub token variables
+are removed. Authmux rejects GitHub CLI plaintext-token fallback; configure a
+supported system credential store instead. GitHub execution accepts only `gh`;
+raw `git` authentication is not selected by `GH_CONFIG_DIR` and fails closed.
 
 JSON output follows the checked-in, versioned
 [`status-v3` schema](docs/schemas/status-v3.schema.json). Human and JSON reports
@@ -190,6 +226,19 @@ cargo test --test live_gcp -- --ignored --exact \
 The native login inherits the terminal and may open a browser. The test does
 not capture its output, authorization URL, or input.
 
+The GitHub live gate validates the configured login and runs one read-only API
+request through guarded execution:
+
+```console
+AUTHMUX_LIVE_GITHUB_CONTEXT=github \
+AUTHMUX_LIVE_GITHUB_ACKNOWLEDGE_PROVIDER_CONTACT=1 \
+cargo test --test live_github -- --ignored --exact \
+  configured_github_context_completes_the_live_cli_workflow
+```
+
+It never invokes `gh auth token` or `--show-token`; captured output is not
+printed by the test.
+
 Empire AI work begins with an OpenSSH client readiness check that does not read
 SSH configuration, inspect an agent, resolve or contact a host, or trigger MFA.
 Run its opt-in local gate with:
@@ -271,7 +320,8 @@ binding must make that decision explicitly.
 ## Current state
 
 The crate now contains AWS identity guards, independent gcloud CLI and ADC
-selection observations, SSH local transport observation, bounded provider
+selection observations, GitHub provider validation and isolated execution, SSH
+local transport observation, aggregate all-context status, bounded provider
 probes, strict configuration parsing, and isolated child execution. It remains
 a development tracer rather than a released CLI. CI runs the same format,
 strict lint, test, and locked build gates on pinned Ubuntu and macOS runners.

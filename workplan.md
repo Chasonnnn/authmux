@@ -60,7 +60,8 @@ machine and already uses the providers' supported CLIs.
   - Google Cloud after the AWS vertical slice proves the Interface, with gcloud
     CLI configuration and Application Default Credentials treated as separate
     credential planes and observed independently.
-- Evidence-only feasibility notes for GitHub. Empire AI enters 0.1 through
+- GitHub CLI status, login, and guarded execution through user-owned
+  `GH_CONFIG_DIR` selectors and system credential-store custody. Empire AI enters 0.1 through
   bounded OpenSSH local readiness and explicit native SSH login delegation; it
   gains no remote status or execution selection unless a later gate proves
   those behaviors without copying credentials, executing user configuration
@@ -78,7 +79,7 @@ machine and already uses the providers' supported CLIs.
   workflows, a GUI, or a hosted control plane.
 - SSH certificate issuance or a general-purpose SSH connection manager;
   user-owned OpenSSH multiplexing may be used by explicit native login.
-- GitHub or SSH execution selection without a provider-supported,
+- SSH or raw Git authentication selection without a provider-supported,
   process-scoped mechanism.
 - `shell`, generic logout or revocation, automatic identity discovery, external
   Provider Adapter plugins, or arbitrary environment-selector maps.
@@ -117,7 +118,7 @@ or a Credential.
 ## 6. Proposed command contract
 
 ```console
-authmux status [--context NAME] [--provider NAME] [--json] [--require-active-transport]
+authmux status [--all | --context NAME] [--provider NAME] [--json] [--require-active-transport]
 authmux doctor [--context NAME] [--provider NAME] [--json]
 authmux login <context> [--provider NAME]
 authmux exec [--context NAME] -- <program> [args...]
@@ -328,9 +329,10 @@ Deliverables:
 - [x] Compare the fictional AWS mismatch workflow against Atmos and against a
   `direnv` plus native-CLI control, using Granted for AWS where it is already
   configured; record versioned build-vs-adopt evidence.
-- [ ] Test the GitHub hypothesis of pre-provisioned, user-owned
-  `GH_CONFIG_DIR` directories, secure credential-store failure, and Git helper
-  behavior without switching a shared active account or extracting a token.
+- [x] Test the GitHub hypothesis of pre-provisioned, user-owned
+  `GH_CONFIG_DIR` directories and secure credential-store failure without
+  switching a shared active account or extracting a token. Keep raw Git and
+  credential-helper selection explicitly unsupported.
 - [x] Treat gcloud CLI authentication and ADC as separate evidence surfaces;
   run the synthetic command-purity gate without reading or printing
   credentials; record the failed zero-write result in ADR 0006.
@@ -338,7 +340,8 @@ Deliverables:
   operations, and synthetic no-write implementation gate.
 - [x] Limit SSH evidence to local readiness in 0.1; do not infer remote
   identity, MFA state, authorization, or expiry from agent inspection.
-- [ ] Validate the proposed status states against real provider evidence.
+- [x] Validate the proposed status states against real AWS, GCP, GitHub, and
+  OpenSSH evidence without retaining raw provider output.
 - [x] Create the Rust crate, CI, formatting, linting, and test harness under the
   pinned toolchain.
 
@@ -419,7 +422,8 @@ Deliverables:
   filtered environment inheritance, and no capture of MFA input or native
   output; leave `ControlMaster` and `ControlPersist` under user-owned OpenSSH
   configuration per ADR 0004.
-- [ ] Refuse unsafe global switching by default.
+- [x] Refuse unsafe global switching by default; GitHub selection uses
+  `GH_CONFIG_DIR` and never runs `gh auth switch`.
 - [x] Add cross-context concurrency tests and hostile argument tests.
 
 Exit criteria:
@@ -437,7 +441,8 @@ Exit criteria:
 
 Deliverables:
 
-- [x] Implement `login` plans for all initial providers: AWS, GCP, and SSH.
+- [x] Implement `login` plans for all initial providers: AWS, GCP, GitHub, and
+  SSH.
 - [x] Delegate explicit AWS Reauthentication to `aws login` or `aws sso login`
   from bounded local profile metadata, including guarded source-profile
   traversal for selected role profiles under ADR 0009.
@@ -462,7 +467,7 @@ Exit criteria:
 - The post-login report distinguishes native command success from validated
   session usability.
 
-### Phase 4 — hardening and dogfood release
+### Phase 4 — hardening and live workflow release gate
 
 Deliverables:
 
@@ -473,16 +478,19 @@ Deliverables:
   config migration guide.
 - [ ] Package signed checksummed binaries for macOS arm64/x64 and Linux x64.
 - [ ] Add opt-in diagnostics that are inspectable and sanitized.
-- [ ] Dogfood across at least two unrelated organizations and four real
-  projects for two weeks.
+- [ ] Execute status, explicit login recovery where needed, and guarded work
+  commands end to end across at least two unrelated organizations and four
+  real projects. Repeat the focused gates after provider CLI or adapter changes;
+  do not impose a passive waiting period.
 
 Exit criteria:
 
 - No high-severity security findings remain open.
 - A fresh machine can install, configure, diagnose, and remove authmux using
   the documented path.
-- Dogfood notes show whether context errors or reauthentication friction
-  decreased; failures include reproducible evidence.
+- Live workflow evidence shows that the intended identity authenticates and
+  completes one representative provider operation; failures include
+  reproducible, sanitized evidence.
 - The project passes the go/no-go criteria in section 14.
 
 ### Phase 5 — public OSS readiness
@@ -529,9 +537,6 @@ is hard to reverse, surprising, and a real trade-off.
 
 - CLI framework and async runtime, if any.
 - Exact user and project config locations and precedence.
-- Whether pre-provisioned `GH_CONFIG_DIR` directories remain safely isolated
-  when the OS credential store is unavailable and when Git uses `gh` as a
-  credential helper.
 - Whether a user-owned ADC reference has portable, process-scoped behavior
   across the supported Google client libraries.
 - Remaining exit-code taxonomy for login and partial multi-provider failure.
@@ -539,8 +544,8 @@ is hard to reverse, surprising, and a real trade-off.
 
 ## 14. Go/no-go economics
 
-Continue beyond the dogfood release only if the two-week trial demonstrates at
-least two of these outcomes:
+Continue beyond the live workflow release gate only if focused real-provider
+verification demonstrates at least two of these outcomes:
 
 - It prevents or catches a real wrong-account or wrong-project action.
 - It removes repeated manual status/login steps on most active workdays.
@@ -590,10 +595,10 @@ A slice is complete only when:
 
 ## 17. Immediate next slice
 
-The fictional AWS tracer proves fail-closed mismatch behavior, matching
-process-scoped execution with exit-code and Unix-signal parity, and root-bounded
-Project Binding discovery. The Atmos and `direnv` comparison and provider
-command matrix are complete. Implement `context show` next because it can
-explain intent and provenance without touching provider state. Keep `status`
-blocked on a separate local-metadata observation contract; do not reuse the
-potentially cache-refreshing `exec` preflight.
+GitHub status, doctor, explicit native login, guarded execution, and aggregate
+`status --all` are implemented behind user-owned `GH_CONFIG_DIR` selectors.
+The live GitHub gate and aggregate all-provider command pass. The immediate
+real-provider round found expired AIW AWS and GCP Sessions plus unverifiable
+Empire SSH reuse, while NTO AWS and GitHub passed. Complete those explicit
+native recoveries, rerun their guarded provider operations, then perform the
+dedicated security review and fuzz/property-test pass before packaging.

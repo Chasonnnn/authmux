@@ -5,6 +5,70 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use authmux::{ProjectBinding, UserConfig};
 
 #[test]
+fn github_provider_resolves_only_native_selector_and_expected_identity() {
+    let source = "version = 1\n\
+                  [contexts.github.providers.github]\n\
+                  config_dir = \"/fictional/home/.config/gh/research\"\n\
+                  hostname = \"github.com\"\n\
+                  expected_login = \"fictional-researcher\"\n";
+
+    let config = UserConfig::parse(source).expect("GitHub provider config is valid");
+    let definition = config
+        .resolve_context_definition("github")
+        .expect("GitHub context resolves");
+    let github = definition.github().expect("GitHub provider resolves");
+
+    assert_eq!(
+        github.config_dir().to_str(),
+        Some("/fictional/home/.config/gh/research")
+    );
+    assert_eq!(github.hostname(), "github.com");
+    assert_eq!(github.expected_login(), "fictional-researcher");
+}
+
+#[test]
+fn github_provider_rejects_secret_shaped_metadata_without_echoing_it() {
+    let seeded_secret = "ghp_fictional_provider_secret";
+    let source = format!(
+        "version = 1\n\
+         [contexts.github.providers.github]\n\
+         config_dir = \"/fictional/home/.config/gh/research\"\n\
+         hostname = \"github.com\"\n\
+         expected_login = \"{seeded_secret}\"\n"
+    );
+
+    let failure = UserConfig::parse(&source).expect_err("secret-shaped metadata is rejected");
+    let diagnostic = failure.to_string();
+    assert_eq!(
+        diagnostic,
+        "user configuration contains secret-shaped GitHub metadata"
+    );
+    assert!(!diagnostic.contains(seeded_secret));
+}
+
+#[test]
+fn github_provider_rejects_unsafe_selector_metadata() {
+    for source in [
+        "version = 1\n\
+         [contexts.github.providers.github]\n\
+         config_dir = \"relative/gh\"\n\
+         hostname = \"github.com\"\n\
+         expected_login = \"fictional-researcher\"\n",
+        "version = 1\n\
+         [contexts.github.providers.github]\n\
+         config_dir = \"/fictional/home/.config/gh/research\"\n\
+         hostname = \"https://github.com\"\n\
+         expected_login = \"fictional-researcher\"\n",
+    ] {
+        let failure = UserConfig::parse(source).expect_err("unsafe GitHub metadata is rejected");
+        assert_eq!(
+            failure.to_string(),
+            "user configuration contains invalid GitHub Provider Profile metadata"
+        );
+    }
+}
+
+#[test]
 fn secret_shaped_profile_value_is_rejected_without_echoing_it() {
     let seeded_secret = "AKIA1111111111111111";
     let source = format!(

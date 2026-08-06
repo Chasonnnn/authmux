@@ -11,9 +11,9 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 
 use crate::{
-    AuthenticationContext, AwsLocalMetadataAdapter, CommandSpec, ExecutionSelection, IdentityMatch,
-    ObservationReason, ProbePolicy, ProbeRunner, SshClientReadinessCheck, SshProviderDefinition,
-    StatusEngine,
+    AuthenticationContext, AwsLocalMetadataAdapter, CommandSpec, ExecutionSelection,
+    GithubProviderDefinition, IdentityMatch, ObservationReason, ProbePolicy, ProbeRunner,
+    SshClientReadinessCheck, SshProviderDefinition, StatusEngine,
 };
 #[cfg(unix)]
 use crate::{
@@ -27,6 +27,38 @@ pub struct AwsDoctor<VR, SR> {
 
 pub struct SshDoctor<R> {
     runner: R,
+}
+
+pub struct GithubDoctor<R> {
+    runner: R,
+}
+
+impl<R> GithubDoctor<R>
+where
+    R: ProbeRunner,
+{
+    #[must_use]
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+
+    #[must_use]
+    pub fn diagnose(&self, context_name: &str, profile: &GithubProviderDefinition) -> DoctorResult {
+        let configuration = DoctorCheck::pass("configuration", "GitHub Provider Profile resolved");
+        let cli = observe_github_version(&self.runner, profile);
+        DoctorResult {
+            context: context_name.to_owned(),
+            provider_contacted: false,
+            checks: vec![
+                configuration,
+                cli,
+                DoctorCheck::warning(
+                    "github_session",
+                    "Session usability and credential storage were not observed",
+                ),
+            ],
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -154,6 +186,38 @@ where
             checks,
         }
     }
+}
+
+fn observe_github_version<R>(runner: &R, profile: &GithubProviderDefinition) -> DoctorCheck
+where
+    R: ProbeRunner,
+{
+    let Ok(command) = CommandSpec::new("gh", ["--version"]) else {
+        return DoctorCheck::fail("gh_cli", "GitHub CLI command could not be constructed");
+    };
+    let Ok(output) = runner.probe(
+        &command,
+        &profile.execution_selection(),
+        ProbePolicy::bounded(Duration::from_secs(2), 4_096),
+    ) else {
+        return DoctorCheck::fail("gh_cli", "GitHub CLI could not be executed safely");
+    };
+    if output.exit_code() != 0 || output.was_truncated() {
+        return DoctorCheck::fail("gh_cli", "GitHub CLI version could not be established");
+    }
+    let Ok(text) = str::from_utf8(output.stdout()) else {
+        return DoctorCheck::fail("gh_cli", "GitHub CLI returned malformed version output");
+    };
+    let Some(version) = text
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("gh version "))
+        .and_then(|remainder| remainder.split_whitespace().next())
+        .filter(|version| version.starts_with("2."))
+    else {
+        return DoctorCheck::fail("gh_cli", "GitHub CLI v2 is required");
+    };
+    DoctorCheck::pass("gh_cli", format!("GitHub CLI {version} is supported"))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

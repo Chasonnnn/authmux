@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chasonnnn/authmux/blob/main/docs/schemas/status-all-v1.schema.json",
+  "title": "authmux status --all schema version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "command", "contexts"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "command": { "const": "status_all" },
+    "contexts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["context", "observations"],
+        "properties": {
+          "context": { "type": "string", "minLength": 1 },
+          "observations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "status-v3.schema.json#/$defs/observation"
+            }
+          }
+        }
+      }
+    }
+  }
+}

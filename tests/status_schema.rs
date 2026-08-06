@@ -20,6 +20,16 @@ fn checked_in_status_schema_and_golden_are_valid_json() {
 }
 
 #[test]
+fn checked_in_all_status_schema_is_valid_json() {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../docs/schemas/status-all-v1.schema.json"))
+            .expect("all-status schema is valid JSON");
+
+    assert_eq!(schema["properties"]["schema_version"]["const"], 1);
+    assert_eq!(schema["properties"]["command"]["const"], "status_all");
+}
+
+#[test]
 fn checked_in_context_list_schema_and_golden_are_valid_json() {
     let schema: Value =
         serde_json::from_str(include_str!("../docs/schemas/context-list-v2.schema.json"))

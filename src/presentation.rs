@@ -11,16 +11,22 @@ use crate::{
 #[cfg(unix)]
 use crate::{
     GcpCredentialPlane, GcpPlaneObservation, GcpProjectMatch, GcpProviderDefinition,
-    SshProviderDefinition, SshTransportObservation, SshTransportReuse,
+    GithubProviderDefinition, SshProviderDefinition, SshTransportObservation, SshTransportReuse,
 };
 
 const STATUS_SCHEMA_VERSION: u32 = 3;
 const CONTEXT_LIST_SCHEMA_VERSION: u32 = 2;
 const DOCTOR_SCHEMA_VERSION: u32 = 1;
+const ALL_STATUS_SCHEMA_VERSION: u32 = 1;
 
 pub struct StatusReport {
     context: String,
     observations: Vec<StatusEntry>,
+}
+
+pub struct AllStatusReport {
+    configured_context_count: usize,
+    reports: Vec<StatusReport>,
 }
 
 pub struct ContextListReport {
@@ -77,6 +83,19 @@ struct ProviderReference {
 struct StatusDocument<'a> {
     schema_version: u32,
     command: &'static str,
+    context: &'a str,
+    observations: &'a [StatusEntry],
+}
+
+#[derive(Serialize)]
+struct AllStatusDocument<'a> {
+    schema_version: u32,
+    command: &'static str,
+    contexts: Vec<AllStatusContext<'a>>,
+}
+
+#[derive(Serialize)]
+struct AllStatusContext<'a> {
     context: &'a str,
     observations: &'a [StatusEntry],
 }
@@ -224,6 +243,50 @@ impl StatusReport {
         })
     }
 
+    /// Builds a presentation-safe report from GitHub CLI provider validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the observation time cannot be represented.
+    #[cfg(unix)]
+    pub fn github(
+        context_name: &str,
+        profile: &GithubProviderDefinition,
+        observation: &StatusObservation,
+    ) -> Result<Self, PresentationFailure> {
+        let observed_at_unix = observation
+            .observed_at()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| PresentationFailure::new("status observation time is invalid"))?
+            .as_secs();
+        Ok(Self {
+            context: context_name.to_owned(),
+            observations: vec![StatusEntry {
+                provider: "github",
+                credential_plane: None,
+                profile: profile.hostname().to_owned(),
+                expected_identity: profile.expected_login().to_owned(),
+                observed_identity: observation
+                    .observed_identity()
+                    .map(|identity| identity.value().to_owned()),
+                identity_match: identity_match(observation.identity_match()),
+                expected_source_identity: None,
+                observed_source_identity: None,
+                source_identity_match: None,
+                expected_project: None,
+                observed_project: None,
+                project_match: None,
+                session_usability: session_usability(observation.usability()),
+                reason: observation_reason(observation.reason()),
+                reauthentication_need: reauthentication_need(observation.reauthentication_need()),
+                evidence_level: evidence_level(observation.evidence_level()),
+                provider_contacted: true,
+                transport_reuse: None,
+                observed_at_unix,
+            }],
+        })
+    }
+
     #[must_use]
     pub fn render_human(&self) -> String {
         let mut report = String::new();
@@ -252,6 +315,54 @@ impl StatusReport {
         };
         let mut json = serde_json::to_string_pretty(&document)
             .map_err(|_| PresentationFailure::new("could not serialize status report"))?;
+        json.push('\n');
+        Ok(json)
+    }
+}
+
+impl AllStatusReport {
+    #[must_use]
+    pub fn new(configured_context_count: usize, reports: Vec<StatusReport>) -> Self {
+        Self {
+            configured_context_count,
+            reports,
+        }
+    }
+
+    #[must_use]
+    pub fn render_human(&self) -> String {
+        let context_count = self.configured_context_count;
+        let mut rendered = format!(
+            "authentication status: {context_count} context{}\n",
+            if context_count == 1 { "" } else { "s" }
+        );
+        for report in &self.reports {
+            rendered.push('\n');
+            rendered.push_str(&report.render_human());
+        }
+        rendered
+    }
+
+    /// Serializes all successful provider observations into a stable schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the fixed report cannot be serialized.
+    pub fn render_json(&self) -> Result<String, PresentationFailure> {
+        let document = AllStatusDocument {
+            schema_version: ALL_STATUS_SCHEMA_VERSION,
+            command: "status_all",
+            contexts: self
+                .reports
+                .iter()
+                .map(|report| AllStatusContext {
+                    context: &report.context,
+                    observations: &report.observations,
+                })
+                .collect(),
+        };
+        let mut json = serde_json::to_string_pretty(&document)
+            .map_err(|_| PresentationFailure::new("could not serialize all-status report"))?;
         json.push('\n');
         Ok(json)
     }
@@ -440,6 +551,14 @@ impl ContextListReport {
                         });
                     }
                 }
+                if let Some(github) = definition.github() {
+                    providers.push(ProviderReference {
+                        provider: "github",
+                        credential_plane: None,
+                        profile: github.hostname().to_owned(),
+                        expected_identity: github.expected_login().to_owned(),
+                    });
+                }
                 ContextListEntry {
                     name: definition.name().to_owned(),
                     description: definition.description().map(str::to_owned),
@@ -501,6 +620,16 @@ impl ContextListReport {
                         writeln!(
                             report,
                             "  expected ADC identity: {}",
+                            provider.expected_identity
+                        )
+                        .expect("writing to a String cannot fail");
+                    }
+                    "github" => {
+                        writeln!(report, "  GitHub hostname: {}", provider.profile)
+                            .expect("writing to a String cannot fail");
+                        writeln!(
+                            report,
+                            "  expected GitHub login: {}",
                             provider.expected_identity
                         )
                         .expect("writing to a String cannot fail");

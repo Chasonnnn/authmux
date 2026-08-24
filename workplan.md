@@ -39,7 +39,8 @@ machine and already uses the providers' supported CLIs.
 
 ### Core workflows
 
-- Enter a repository and see the intended identities plus current status.
+- Resolve the intended identities once when entering an unfamiliar repository
+  or after its binding changes.
 - Run a command under the repository's context without changing global state.
 - Reauthenticate one expired Provider Profile using the native flow.
 - Diagnose a missing CLI, invalid config, unreachable provider, or ambiguous
@@ -120,7 +121,7 @@ or a Credential.
 ```console
 authmux status [--all | --context NAME] [--provider NAME] [--json] [--require-active-transport]
 authmux doctor [--context NAME] [--provider NAME] [--json]
-authmux login <context> [--provider NAME]
+authmux login <context> [--provider NAME] [--print-command]
 authmux exec [--context NAME] -- <program> [args...]
 authmux context list [--json]
 authmux context show [--context NAME]
@@ -142,8 +143,14 @@ Behavioral rules:
 - `login` shows exactly which Provider Profile will be affected and delegates
   to its native flow. SSH login evaluates user-owned OpenSSH configuration only
   after this preview; authmux neither configures nor promises connection reuse.
+  `--print-command` stops after the sanitized preview so a captured agent can
+  direct the user to rerun authmux without that flag in a separate terminal,
+  preserving process-scoped provider selectors.
 - `exec` resolves one context, builds a minimal child environment, and uses an
-  argument vector. It forwards the child's exit code and signals.
+  argument vector. It forwards the child's exit code and signals. It is the
+  normal work path and does not require a preceding `status` or `doctor` call.
+  A safely classified interactive Reauthentication requirement exits `10` with
+  one `exec-event-v1` JSON object on stderr; it never starts login implicitly.
 - `--json` has a versioned schema and contains sanitized structured data only.
 
 ## 7. Configuration sketch
@@ -452,6 +459,12 @@ Deliverables:
 - [x] Preview the affected SSH Provider Profile and native command before
   mutation.
 - [x] Support SSH interactive terminal handoff without capturing secrets.
+- [x] Add a non-executing, external-terminal login handoff for AWS, GCP,
+  GitHub, and SSH so captured agent sessions do not own native login output.
+- [x] Add `exec-event-v1` and exit code `10` for safely classified AWS and
+  GitHub Reauthentication, preserving one exact-command retry for agents.
+- [x] Report each provider's honest continuity boundary through `doctor`
+  without adding provider contact or reading Credential caches.
 - [x] Re-observe protected local SSH Transport Reuse after successful native
   login and display the result without claiming remote Session Usability.
 - [x] Preserve native cancellation signals and failure exits through one shared
@@ -462,7 +475,8 @@ Deliverables:
 Exit criteria:
 
 - Login never runs from `status`, `doctor`, or `exec` implicitly.
-- Interactive secrets bypass authmux capture and logging.
+- Interactive secrets bypass both authmux capture and, when `--print-command`
+  is used, the captured agent process tree.
 - Cancellation leaves other contexts untouched.
 - The post-login report distinguishes native command success from validated
   session usability.
@@ -482,6 +496,9 @@ Deliverables:
   commands end to end across at least two unrelated organizations and four
   real projects. Repeat the focused gates after provider CLI or adapter changes;
   do not impose a passive waiting period.
+- [ ] Route unattended deployment and sanitized log retrieval that may outlive
+  a human Session through each repository's approved OIDC or workload identity
+  and verify the agent can trigger and observe that path without static keys.
 
 Exit criteria:
 
@@ -525,8 +542,8 @@ Exit criteria:
 | Redaction | seeded secrets across success, failure, JSON, terminal, panic paths |
 | Provider Adapter | redacted contract fixtures plus opt-in read-only integration |
 | `status` / `doctor` | no-side-effect assertion and partial-failure behavior |
-| `exec` | cross-context isolation, child exit/signal parity, drift detection |
-| `login` | explicit preview, terminal passthrough, cancel/failure behavior |
+| `exec` | cross-context isolation, child exit/signal parity, drift detection, structured Reauthentication event |
+| `login` | explicit preview, non-executing handoff, terminal passthrough, cancel/failure behavior |
 | Packaging | clean-machine install, checksum/signature, uninstall |
 | OSS gate | history scan, fictional fixtures, public CI, security review |
 
@@ -566,6 +583,14 @@ Pause or narrow the project if:
 Recommended investment cap before this gate: a focused prototype and dogfood
 cycle, not a hosted product or team platform.
 
+The next dogfood re-gate uses at least 50 authenticated work commands across
+the existing projects. Continue broadening authmux only if the sample has no
+repeated login launch for the same provider incident, no routine status call
+before successful guarded execution, no broad `authmux` approval rule, and at
+least one observed wrong-context prevention or a material reduction in native
+selection steps. If neither user benefit appears, keep only the provider guards
+that demonstrate value or retire the wrapper in favor of native project notes.
+
 ## 15. Risk register
 
 | Risk | Impact | Mitigation | Trigger to revisit |
@@ -595,10 +620,9 @@ A slice is complete only when:
 
 ## 17. Immediate next slice
 
-GitHub status, doctor, explicit native login, guarded execution, and aggregate
-`status --all` are implemented behind user-owned `GH_CONFIG_DIR` selectors.
-The live GitHub gate and aggregate all-provider command pass. The immediate
-real-provider round found expired AIW AWS and GCP Sessions plus unverifiable
-Empire SSH reuse, while NTO AWS and GitHub passed. Complete those explicit
-native recoveries, rerun their guarded provider operations, then perform the
-dedicated security review and fuzz/property-test pass before packaging.
+Collect the 50-command dogfood sample defined in section 14 using the shared
+Codex and Claude continuity workflow. Include at least one safely simulated
+Reauthentication pause and exact-command retry, plus one repository-approved
+OIDC deployment path. Then keep, narrow, or retire each provider path from
+observed value before the dedicated security review and fuzz/property-test
+pass.

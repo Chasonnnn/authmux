@@ -135,6 +135,35 @@ fn github_login_delegates_to_gh_and_validates_the_selected_login_afterward() {
 }
 
 #[test]
+fn github_login_can_print_an_external_terminal_handoff_without_starting_native_login() {
+    let fixture = GithubCliFixture::new("login-print-command");
+    let bin_directory = fixture.configure_gh_login();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "github", "--provider", "github", "--print-command"])
+        .env("HOME", fixture.home())
+        .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .env("GH_TOKEN", "ghp_fictional_must_not_pass")
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "login: github\n\
+         provider: github\n\
+         GitHub hostname: github.com\n\
+         expected GitHub login: fictional-researcher\n\
+         native command: gh auth login --hostname github.com --web --skip-ssh-key\n\
+         handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
 fn github_exec_validates_identity_then_runs_the_child_with_process_scoped_selection() {
     let fixture = GithubCliFixture::new("exec-success");
     let bin_directory = fixture.configure_gh_exec();
@@ -194,7 +223,7 @@ fn github_doctor_checks_local_readiness_without_contacting_github() {
     assert!(stdout.contains("- [pass] configuration: GitHub Provider Profile resolved\n"));
     assert!(stdout.contains("- [pass] gh_cli: GitHub CLI 2.96.0 is supported\n"));
     assert!(stdout.contains(
-        "- [warning] github_session: Session usability and credential storage were not observed\n"
+        "- [warning] session_continuity: GitHub has no supported automatic Credential renewal contract; an unusable Session requires external login\n"
     ));
     assert!(stderr.is_empty());
 }
@@ -276,7 +305,7 @@ fn github_exec_blocks_an_unexpected_active_login_before_spawning_the_child() {
 }
 
 #[test]
-fn github_exec_names_the_context_in_the_reauthentication_command() {
+fn github_exec_emits_a_structured_reauthentication_event_for_an_unusable_session() {
     let fixture = GithubCliFixture::new("session-unusable");
     let bin_directory = fixture.configure_gh("failure", "fictional-researcher", "keyring", 0);
 
@@ -297,11 +326,42 @@ fn github_exec_names_the_context_in_the_reauthentication_command() {
         .output()
         .expect("authmux runs");
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(10));
     assert!(output.stdout.is_empty());
     assert_eq!(
         String::from_utf8(output.stderr).expect("stderr is UTF-8"),
-        "refusing child execution: GitHub Session is not usable; run `authmux login github --provider github`\n"
+        "{\"schema_version\":1,\"event\":\"reauthentication_required\",\"context\":\"github\",\"provider\":\"github\",\"login_argv\":[\"authmux\",\"login\",\"github\",\"--provider\",\"github\",\"--print-command\"],\"retry\":\"original_command_once\"}\n"
+    );
+}
+
+#[test]
+fn github_exec_emits_the_reauthentication_event_when_the_selected_host_is_missing() {
+    let fixture = GithubCliFixture::new("session-missing");
+    let bin_directory = fixture.configure_gh_missing_host();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "github",
+            "--",
+            "gh",
+            "repo",
+            "view",
+            "fictional/repository",
+        ])
+        .env("HOME", fixture.home())
+        .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    assert_eq!(output.status.code(), Some(10));
+    assert!(output.stdout.is_empty());
+    assert!(!fixture.path.join("child-ran").exists());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr is UTF-8"),
+        "{\"schema_version\":1,\"event\":\"reauthentication_required\",\"context\":\"github\",\"provider\":\"github\",\"login_argv\":[\"authmux\",\"login\",\"github\",\"--provider\",\"github\",\"--print-command\"],\"retry\":\"original_command_once\"}\n"
     );
 }
 
@@ -446,6 +506,28 @@ impl GithubCliFixture {
                 self.invocation().display(),
                 self.invocation().display(),
                 self.invocation().display(),
+            ),
+        )
+        .expect("fictional gh is written");
+        set_mode(&executable, 0o700);
+        bin_directory
+    }
+
+    fn configure_gh_missing_host(&self) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        fs::create_dir_all(&bin_directory).expect("bin directory is created");
+        let executable = bin_directory.join("gh");
+        fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1 $2\" = \"auth status\" ]; then\n\
+                   printf '%s\\n' '{{\"hosts\":{{}}}}'\n\
+                   exit 0\n\
+                 fi\n\
+                 touch '{}'\n\
+                 exit 0\n",
+                self.path.join("child-ran").display()
             ),
         )
         .expect("fictional gh is written");

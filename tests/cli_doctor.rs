@@ -88,9 +88,10 @@ fn provider_scoped_ssh_doctor_reports_local_readiness_only() {
         "doctor: empire\n\
          result: warning\n\
          provider contacted: no\n\
-         checks: 3\n\
+         checks: 4\n\
          - [pass] configuration: SSH host alias and Expected Identity resolved\n\
          - [pass] openssh_client: OpenSSH_10.2p1 is supported\n\
+         - [warning] session_continuity: OpenSSH transport reuse is not Credential renewal and may lapse independently\n\
          - [warning] ssh_remote_session: remote identity, authorization, MFA state, Session Usability, and expiry were not observed\n"
     );
     assert!(stderr.is_empty());

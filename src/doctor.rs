@@ -53,8 +53,8 @@ where
                 configuration,
                 cli,
                 DoctorCheck::warning(
-                    "github_session",
-                    "Session usability and credential storage were not observed",
+                    "session_continuity",
+                    "GitHub has no supported automatic Credential renewal contract; an unusable Session requires external login",
                 ),
             ],
         }
@@ -103,8 +103,8 @@ impl GcpDoctor {
             )),
         }
         checks.push(DoctorCheck::warning(
-            "gcp_session",
-            "credential usability, refresh, authorization, and expiry were not observed",
+            "session_continuity",
+            "the native gcloud or ADC child owns Credential renewal; authmux cannot classify child expiration safely",
         ));
         DoctorResult {
             context: context_name.to_owned(),
@@ -148,6 +148,10 @@ where
             configuration,
             openssh,
             DoctorCheck::warning(
+                "session_continuity",
+                "OpenSSH transport reuse is not Credential renewal and may lapse independently",
+            ),
+            DoctorCheck::warning(
                 "ssh_remote_session",
                 "remote identity, authorization, MFA state, Session Usability, and expiry were not observed",
             ),
@@ -179,6 +183,10 @@ where
             DoctorCheck::pass("configuration", "context resolved"),
             observe_aws_version(&self.version_runner),
             observe_profile_identity(&self.status_runner, context),
+            DoctorCheck::warning(
+                "session_continuity",
+                "native AWS execution may renew Credentials, but the parent Session lifetime is not observed",
+            ),
         ];
         DoctorResult {
             context: context.name().to_owned(),

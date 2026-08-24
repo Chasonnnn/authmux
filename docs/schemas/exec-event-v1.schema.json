@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chasonnnn/authmux/blob/main/docs/schemas/exec-event-v1.schema.json",
+  "title": "authmux execution event schema version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event",
+    "context",
+    "provider",
+    "login_argv",
+    "retry"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event": { "const": "reauthentication_required" },
+    "context": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "provider": {
+      "type": "string",
+      "enum": ["aws", "github"]
+    },
+    "login_argv": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        { "const": "authmux" },
+        { "const": "login" },
+        { "type": "string", "minLength": 1, "maxLength": 512 },
+        { "const": "--provider" },
+        { "enum": ["aws", "github"] },
+        { "const": "--print-command" }
+      ],
+      "items": false
+    },
+    "retry": { "const": "original_command_once" }
+  }
+}

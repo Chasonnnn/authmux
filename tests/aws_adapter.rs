@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use authmux::{
     AuthenticationContext, AwsAdapter, EvidenceLevel, ExecutionSelection, IdentityMatch,
-    ProbeOutput, ProbePolicy, ProbeRunner, ProviderAdapter, ProviderFailure, SessionUsability,
+    ObservationReason, ProbeOutput, ProbePolicy, ProbeRunner, ProviderAdapter, ProviderFailure,
+    ReauthenticationNeed, SessionUsability,
 };
 
 struct AwsIdentityFixture {
@@ -101,37 +102,63 @@ fn provider_failure_does_not_expose_native_output() {
 }
 
 #[test]
-fn recorded_nonzero_status_fixtures_remain_sanitized_execution_failures() {
+fn recorded_expired_and_missing_sessions_require_explicit_reauthentication() {
     let fixtures = [
         (
-            "expired fixture must fail closed",
             include_bytes!("fixtures/aws/expired.stderr").as_slice(),
+            ObservationReason::Expired,
         ),
         (
-            "missing-login fixture must fail closed",
             include_bytes!("fixtures/aws/missing-login.stderr").as_slice(),
-        ),
-        (
-            "unreachable fixture must fail closed",
-            include_bytes!("fixtures/aws/unreachable.stderr").as_slice(),
+            ObservationReason::Missing,
         ),
     ];
     let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
         .expect("fictional context is valid");
 
-    for (expectation, stderr) in fixtures {
+    for (stderr, expected_reason) in fixtures {
         let adapter = AwsAdapter::new(AwsIdentityFixture {
             exit_code: 1,
             stdout: b"",
             stderr,
         });
-        let failure = adapter.observe(&context).expect_err(expectation);
+        let observation = adapter
+            .observe(&context)
+            .expect("recognized Session evidence is normalized");
 
+        assert_eq!(observation.usability(), SessionUsability::Unusable);
+        assert_eq!(observation.reason(), Some(expected_reason));
         assert_eq!(
-            failure.to_string(),
-            "AWS identity observation failed; run `authmux login` for this context"
+            observation.reauthentication_need(),
+            ReauthenticationNeed::Required
         );
+        assert_eq!(
+            observation.evidence_level(),
+            EvidenceLevel::ProviderValidation
+        );
+        assert!(observation.observed_identity().is_none());
     }
+}
+
+#[test]
+fn unreachable_provider_evidence_remains_a_sanitized_failure() {
+    let adapter = AwsAdapter::new(AwsIdentityFixture {
+        exit_code: 1,
+        stdout: b"",
+        stderr: include_bytes!("fixtures/aws/unreachable.stderr"),
+    });
+    let context = AuthenticationContext::aws("crm", "crm-development", "111111111111")
+        .expect("fictional context is valid");
+
+    let failure = adapter
+        .observe(&context)
+        .expect_err("unreachable is not evidence that login is required");
+
+    assert_eq!(
+        failure.to_string(),
+        "AWS identity observation failed; run `authmux login` for this context"
+    );
+    assert!(!failure.to_string().contains("identity.fixture.invalid"));
 }
 
 #[test]

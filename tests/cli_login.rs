@@ -40,6 +40,37 @@ fn ssh_login_previews_the_target_and_delegates_to_openssh() {
 }
 
 #[test]
+fn ssh_login_can_print_an_external_terminal_handoff_without_starting_native_login() {
+    let fixture = LoginFixture::new("ssh-print-command");
+    let bin_directory = fixture.configure_ssh(0);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "empire", "--provider", "ssh", "--print-command"])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "login: empire\n\
+         provider: ssh\n\
+         host alias: empire-alpha\n\
+         expected remote principal: researcher@example.invalid\n\
+         native command: ssh empire-alpha\n\
+         handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+    );
+    assert!(stderr.is_empty());
+    assert!(
+        !fixture.path.join("ssh-ran").exists(),
+        "the external-terminal handoff must not start the native login command"
+    );
+}
+
+#[test]
 fn successful_ssh_login_reports_an_inactive_controlmaster_without_claiming_failure() {
     let fixture = LoginFixture::new("ssh-success-inactive");
     let (bin_directory, _control_master) = fixture.configure_ssh_with_transport(0, 97, false);
@@ -113,6 +144,45 @@ fn gcp_login_previews_selected_account_and_delegates_to_gcloud() {
 }
 
 #[test]
+fn gcp_login_can_print_an_external_terminal_handoff_without_starting_native_login() {
+    let fixture = LoginFixture::new("gcp-print-command");
+    let bin_directory = fixture.configure_gcp(0);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args(["login", "crm", "--print-command", "--provider", "gcp"])
+        .env("HOME", fixture.path.join("home"))
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .env(
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "/ambient/credential-that-must-not-pass.json",
+        )
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stdout.starts_with(
+        "login: crm\n\
+         provider: gcp\n\
+         credential plane: gcloud_cli\n\
+         gcloud configuration: crm-research\n\
+         expected gcloud identity: researcher@example.invalid\n\
+         login account: researcher@example.invalid\n\
+         native command: gcloud auth login researcher@example.invalid --brief --force\n"
+    ));
+    assert!(stdout.ends_with(
+        "handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+    ));
+    assert!(stderr.is_empty());
+    assert!(
+        !fixture.path.join("gcloud-ran").exists(),
+        "the external-terminal handoff must not start the native login command"
+    );
+}
+
+#[test]
 fn aws_console_login_previews_the_selected_profile_and_delegates_to_aws() {
     let fixture = LoginFixture::new("aws-console-success");
     let bin_directory = fixture.configure_aws_console(0);
@@ -145,6 +215,47 @@ fn aws_console_login_previews_the_selected_profile_and_delegates_to_aws() {
          result: native AWS login command exited successfully; live session usability remains unverified\n"
     );
     assert!(stderr.is_empty());
+}
+
+#[test]
+fn aws_login_can_print_an_external_terminal_handoff_without_starting_native_login() {
+    let fixture = LoginFixture::new("aws-console-print-command");
+    let bin_directory = fixture.configure_aws_console(0);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "login",
+            "aws-console",
+            "--provider",
+            "aws",
+            "--print-command",
+        ])
+        .env("HOME", fixture.path.join("home"))
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .env("AWS_ACCESS_KEY_ID", "AKIAFICTIONALMUSTNOTPASS")
+        .output()
+        .expect("authmux runs");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "login: aws-console\n\
+         provider: aws\n\
+         AWS Provider Profile: cornell-development\n\
+         expected AWS account: 111111111111\n\
+         reauthentication mode: console_login\n\
+         native login profile: cornell-development\n\
+         native command: aws login --profile cornell-development --no-cli-auto-prompt\n\
+         handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+    );
+    assert!(stderr.is_empty());
+    assert!(
+        !fixture.path.join("aws-login-ran").exists(),
+        "the external-terminal handoff must not start the native login command"
+    );
 }
 
 #[test]

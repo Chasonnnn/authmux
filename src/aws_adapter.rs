@@ -90,6 +90,13 @@ where
             ));
         }
         if output.exit_code() != 0 {
+            if let Some(reason) = aws_reauthentication_reason(output.stderr()) {
+                return Ok(StatusObservation::unusable_without_identity(
+                    reason,
+                    ReauthenticationNeed::Required,
+                    EvidenceLevel::ProviderValidation,
+                ));
+            }
             return Err(ProviderFailure::sanitized(
                 "AWS identity observation failed; run `authmux login` for this context",
             ));
@@ -111,6 +118,28 @@ where
     ) -> Result<ExecutionSelection, ProviderFailure> {
         Ok(ExecutionSelection::aws_profile(context.provider_profile()))
     }
+}
+
+fn aws_reauthentication_reason(stderr: &[u8]) -> Option<ObservationReason> {
+    let diagnostic = str::from_utf8(stderr).ok()?.to_ascii_lowercase();
+    if [
+        "cached session expired",
+        "sso session associated with this profile has expired or is otherwise invalid",
+        "token has expired and refresh failed",
+        "expiredtoken",
+    ]
+    .iter()
+    .any(|signature| diagnostic.contains(signature))
+    {
+        return Some(ObservationReason::Expired);
+    }
+    if ["session is missing", "error loading sso token"]
+        .iter()
+        .any(|signature| diagnostic.contains(signature))
+    {
+        return Some(ObservationReason::Missing);
+    }
+    None
 }
 
 impl<R> StatusAdapter for AwsLocalMetadataAdapter<R>

@@ -29,6 +29,11 @@ authmux context show
 authmux context show --context crm
 ```
 
+Use `context show` when beginning work in an unfamiliar repository or after the
+working directory, binding, or configuration changes. It is not a required
+preflight before every command: guarded `exec` resolves the binding, validates
+the selected provider, and fails closed itself.
+
 Inspect documented local AWS profile metadata without contacting AWS or
 refreshing a Session:
 
@@ -60,6 +65,7 @@ Explicit AWS Reauthentication delegates to the native profile mode:
 
 ```console
 authmux login crm --provider aws
+authmux login crm --provider aws --print-command
 ```
 
 Console-login profiles use `aws login`; IAM Identity Center profiles use
@@ -67,6 +73,15 @@ Console-login profiles use `aws login`; IAM Identity Center profiles use
 target account and reauthenticates its declared source profile. The preview
 shows both profile selectors before the terminal-attached native command runs.
 Native success does not by itself claim live Session Usability.
+
+`--print-command` performs the same bounded planning and sanitized preview but
+does not start the native login. Use it from Codex, Claude, CI, or another
+captured agent session, then rerun the same `authmux login` without
+`--print-command` in a separate user-controlled terminal. This preserves
+process-scoped provider selectors while keeping browser URLs, device codes,
+MFA prompts, and native login output out of the agent transcript. After the
+user confirms completion, retry the original guarded command; do not add a
+routine `status` round trip.
 
 GitHub uses a user-owned native configuration directory and the system
 credential store:
@@ -114,6 +129,40 @@ gcloud, checks protected selection metadata independently for the gcloud CLI
 and ADC planes, and never opens credential databases or the ADC file.
 Mixed-provider contexts require an
 explicit `--provider`. Warnings exit successfully; failed checks exit `1`.
+`status` and `doctor` are diagnostic and overview commands, not mandatory
+preflights for guarded execution.
+
+## Agent continuity
+
+Native providers may renew their own credentials during an explicitly requested
+guarded operation. Authmux does not run a refresh timer or background daemon.
+When an AWS or GitHub preflight can safely establish that interactive
+Reauthentication is required, `exec` exits `10` and writes one compact JSON
+event to stderr:
+
+```json
+{"schema_version":1,"event":"reauthentication_required","context":"crm","provider":"aws","login_argv":["authmux","login","crm","--provider","aws","--print-command"],"retry":"original_command_once"}
+```
+
+The event follows the checked-in
+[`exec-event-v1` schema](docs/schemas/exec-event-v1.schema.json). Codex and
+Claude preserve the original command, run only the non-executing login preview,
+pause for the user's external-terminal login, and retry the exact command once.
+They stop on a repeated or malformed event.
+
+Continuity remains provider-specific:
+
+| Provider | Continuity behavior |
+|---|---|
+| AWS | The native CLI may renew credentials during the guarded STS preflight. Recognized expired or missing Sessions emit the structured event. |
+| Google Cloud | The gcloud or ADC child owns refresh. Authmux does not capture arbitrary child output or claim that a generic child failure is Reauthentication. |
+| GitHub | An unusable provider-validated Session emits the structured event; Reauthentication remains interactive. |
+| SSH | OpenSSH owns transport reuse. A keepalive or ControlMaster is not Credential renewal and can lapse independently. |
+
+Deployment and log-monitoring loops expected to outlive a human Session should
+run through the repository's approved OIDC or workload-identity path. Authmux
+can guard the command that triggers or observes that workflow, but it does not
+create static cloud keys or keep a human Session alive indefinitely.
 
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
@@ -136,11 +185,12 @@ normal AWS CLI credential resolution, which may update AWS-owned caches under
 its documented behavior; authmux does not request login or capture the
 resulting Credential.
 
-Every explicit native login runs at most one selected provider, has no authmux
-timeout while the user completes its interactive flow, preserves native
+Every executing native login runs at most one selected provider, has no
+authmux timeout while the user completes its interactive flow, preserves native
 nonzero exits and Unix signals, and never retries or falls through to another
-provider. Mixed-provider Authentication Contexts require `--provider` before
-any native command starts.
+provider. The `--print-command` form starts no provider command. Mixed-provider
+Authentication Contexts require `--provider` before either mode produces a
+handoff.
 
 Child processes inherit only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TERM`, plus
 the selected provider profile. Credential environment variables and unrelated
@@ -337,6 +387,8 @@ Start here:
 - [ADR 0007](docs/adr/0007-guard-gcp-exec-with-local-selection.md) — guarded GCP execution boundary
 - [ADR 0008](docs/adr/0008-delegate-gcp-login-to-selected-gcloud-configuration.md) — explicit native GCP login
 - [ADR 0009](docs/adr/0009-delegate-aws-login-by-native-profile-mode.md) — explicit native AWS login mode selection
+- [ADR 0011](docs/adr/0011-handoff-interactive-login-outside-agent-sessions.md) — external-terminal login handoff
+- [ADR 0012](docs/adr/0012-native-refresh-and-resumable-agent-continuity.md) — native refresh and resumable agent continuity
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

@@ -1,6 +1,31 @@
 use serde_json::Value;
 
 #[test]
+fn checked_in_execution_event_schema_is_valid_json() {
+    let schema: Value =
+        serde_json::from_str(include_str!("../docs/schemas/exec-event-v1.schema.json"))
+            .expect("checked-in execution event schema is valid JSON");
+
+    assert_eq!(schema["properties"]["schema_version"]["const"], 1);
+    assert_eq!(
+        schema["properties"]["event"]["const"],
+        "reauthentication_required"
+    );
+    assert_eq!(
+        schema["properties"]["retry"]["const"],
+        "original_command_once"
+    );
+    assert_eq!(
+        schema["properties"]["provider"]["enum"],
+        serde_json::json!(["aws", "github"])
+    );
+    assert_eq!(
+        schema["properties"]["login_argv"]["prefixItems"][5]["const"],
+        "--print-command"
+    );
+}
+
+#[test]
 fn checked_in_status_schema_and_golden_are_valid_json() {
     let schema: Value = serde_json::from_str(include_str!("../docs/schemas/status-v3.schema.json"))
         .expect("checked-in status schema is valid JSON");

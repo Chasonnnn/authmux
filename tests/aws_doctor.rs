@@ -133,9 +133,15 @@ fn aws_login_profile_account_metadata_passes_the_identity_check() {
 
     let result = AwsDoctor::new(&fixture, &fixture).diagnose(&context);
 
-    assert_eq!(result.outcome(), DoctorOutcome::Pass);
+    assert_eq!(result.outcome(), DoctorOutcome::Warning);
     assert!(result.checks().iter().any(|check| {
         check.outcome() == DoctorOutcome::Pass
             && check.summary() == "configured account matches expected identity"
+    }));
+    assert!(result.checks().iter().any(|check| {
+        check.id() == "session_continuity"
+            && check.outcome() == DoctorOutcome::Warning
+                && check.summary()
+                    == "native AWS execution may renew Credentials, but the parent Session lifetime is not observed"
     }));
 }

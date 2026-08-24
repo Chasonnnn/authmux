@@ -172,6 +172,23 @@ impl StatusObservation {
     }
 
     #[must_use]
+    pub fn unusable_without_identity(
+        reason: ObservationReason,
+        reauthentication_need: ReauthenticationNeed,
+        evidence_level: EvidenceLevel,
+    ) -> Self {
+        Self {
+            observed_at: SystemTime::now(),
+            observed_identity: None,
+            identity_match: IdentityMatch::Unverified,
+            usability: SessionUsability::Unusable,
+            reason: Some(reason),
+            reauthentication_need,
+            evidence_level,
+        }
+    }
+
+    #[must_use]
     pub fn indeterminate(
         observed_identity: ObservedIdentity,
         reason: ObservationReason,

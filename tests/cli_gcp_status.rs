@@ -113,7 +113,7 @@ fn gcp_doctor_checks_local_readiness_without_executing_gcloud() {
     assert!(stdout.contains("- [pass] gcloud_project: local gcloud project matches\n"));
     assert!(stdout.contains("- [pass] adc_selector: ADC credential-file selector is available\n"));
     assert!(stdout.contains(
-        "- [warning] gcp_session: credential usability, refresh, authorization, and expiry were not observed\n"
+        "- [warning] session_continuity: the native gcloud or ADC child owns Credential renewal; authmux cannot classify child expiration safely\n"
     ));
     assert!(stdout.contains("provider contacted: no\n"));
     assert!(stderr.is_empty());

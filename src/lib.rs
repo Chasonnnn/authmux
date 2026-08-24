@@ -48,7 +48,8 @@ pub use gcp_login::{GcpLoginFailure, GcpLoginPlan};
 pub use gcp_status::{GcpCredentialPlane, GcpLocalStatus, GcpPlaneObservation, GcpProjectMatch};
 pub use github_status::{GithubExecutionGuard, GithubGuardFailure, GithubLoginPlan, GithubStatus};
 pub use presentation::{
-    AllStatusReport, ContextListReport, DoctorReport, PresentationFailure, StatusReport,
+    AllStatusReport, ContextListReport, DoctorReport, PresentationFailure, ReauthenticationEvent,
+    StatusReport,
 };
 pub use process_runner::SecureProcessRunner;
 pub use process_runner::{ProbeOutput, ProbePolicy, ProbeRunner};

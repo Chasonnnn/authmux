@@ -38,6 +38,37 @@ fn exec_refuses_a_fictional_aws_account_mismatch() {
 }
 
 #[test]
+fn exec_emits_a_structured_reauthentication_event_for_an_expired_aws_session() {
+    let fixture = FixtureDirectory::new("expired-session-event");
+    let bin_directory = fixture.configure_expired_aws();
+    let marker = fixture.path.join("child-ran");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "crm",
+            "--",
+            "/usr/bin/touch",
+            marker.to_str().expect("fixture path is Unicode"),
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stderr = String::from_utf8(output.stderr).expect("event is UTF-8");
+    assert_eq!(output.status.code(), Some(10), "stderr: {stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(!marker.exists(), "expired Session must block the child");
+    assert_eq!(
+        stderr,
+        "{\"schema_version\":1,\"event\":\"reauthentication_required\",\"context\":\"crm\",\"provider\":\"aws\",\"login_argv\":[\"authmux\",\"login\",\"crm\",\"--provider\",\"aws\",\"--print-command\"],\"retry\":\"original_command_once\"}\n"
+    );
+    assert!(!stderr.contains("AKIA1111111111111111"));
+}
+
+#[test]
 fn exec_runs_a_matching_context_with_the_child_exit_code() {
     let fixture = FixtureDirectory::new("matching");
     let bin_directory = fixture.configure_aws("111111111111");
@@ -368,6 +399,41 @@ impl FixtureDirectory {
             ),
         )
         .expect("fictional aws fixture is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fixture metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fictional aws fixture is executable");
+
+        fs::write(
+            config_directory.join("config.toml"),
+            "version = 1\n\
+             [contexts.crm.providers.aws]\n\
+             profile = \"crm-development\"\n\
+             expected_account = \"111111111111\"\n",
+        )
+        .expect("fictional user config is written");
+
+        bin_directory
+    }
+
+    fn configure_expired_aws(&self) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        let config_directory = self.path.join("config").join("authmux");
+        fs::create_dir_all(&bin_directory).expect("fixture bin directory is created");
+        fs::create_dir_all(&config_directory).expect("fixture config directory is created");
+
+        let aws = bin_directory.join("aws");
+        fs::write(
+            &aws,
+            "#!/bin/sh\n\
+             if [ \"$1 $2 $3 $4 $5 $6 $7 $8\" = \"sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt\" ]; then\n\
+               printf 'Error when retrieving an SSO session: cached session expired; AKIA1111111111111111\\n' >&2\n\
+               exit 1\n\
+             fi\n\
+             exit 64\n",
+        )
+        .expect("fictional expired AWS fixture is written");
         let mut permissions = fs::metadata(&aws)
             .expect("fixture metadata is readable")
             .permissions();

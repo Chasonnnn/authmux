@@ -1,7 +1,8 @@
 doctor: crm
-result: pass
+result: warning
 provider contacted: no
-checks: 3
+checks: 4
 - [pass] configuration: context resolved
 - [pass] aws_cli: AWS CLI 2.36.11 is supported
 - [pass] aws_profile_identity: configured account matches expected identity
+- [warning] session_continuity: native AWS execution may renew Credentials, but the parent Session lifetime is not observed

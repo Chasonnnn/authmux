@@ -17,8 +17,9 @@ use authmux::{
     ExecutionContextResolver, ExecutionFailure, ExecutionOutcome, ExecutionSelection, GcpDoctor,
     GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, GithubDoctor,
     GithubExecutionGuard, GithubLoginPlan, GithubStatus, ProcessRunner, ProjectBinding,
-    SecureProcessRunner, SshDoctor, SshTransportObservation, SshTransportReuse, SshTransportStatus,
-    StatusEngine, StatusReport, UserConfig,
+    ReauthenticationEvent, ReauthenticationNeed, SecureProcessRunner, SshDoctor,
+    SshTransportObservation, SshTransportReuse, SshTransportStatus, StatusEngine, StatusReport,
+    UserConfig,
 };
 
 fn main() {
@@ -46,7 +47,8 @@ fn run() -> i32 {
         Ok(CliCommand::Login {
             selection,
             provider,
-        }) => login(selection, provider),
+            mode,
+        }) => login(selection, provider, mode),
         Ok(CliCommand::Doctor {
             selection,
             provider,
@@ -59,7 +61,7 @@ fn run() -> i32 {
     }
 }
 
-fn login(selection: ContextSelection, provider: Option<ProviderSelection>) -> i32 {
+fn login(selection: ContextSelection, provider: Option<ProviderSelection>, mode: LoginMode) -> i32 {
     let selection = match resolve_selection(selection) {
         Ok(selection) => selection,
         Err(message) => {
@@ -90,14 +92,14 @@ fn login(selection: ContextSelection, provider: Option<ProviderSelection>) -> i3
     };
 
     match provider {
-        ProviderSelection::Aws => login_aws(&definition),
-        ProviderSelection::Ssh => login_ssh(&definition),
-        ProviderSelection::Gcp => login_gcp(&definition),
-        ProviderSelection::Github => login_github(&definition),
+        ProviderSelection::Aws => login_aws(&definition, mode),
+        ProviderSelection::Ssh => login_ssh(&definition, mode),
+        ProviderSelection::Gcp => login_gcp(&definition, mode),
+        ProviderSelection::Github => login_github(&definition, mode),
     }
 }
 
-fn login_aws(definition: &ContextDefinition) -> i32 {
+fn login_aws(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(context) = definition.aws() else {
         eprintln!("AWS Provider Profile is not configured");
         return 2;
@@ -120,6 +122,9 @@ fn login_aws(definition: &ContextDefinition) -> i32 {
     if let Err(error) = display_aws_login_preview(definition, &plan) {
         eprintln!("could not display AWS login preview ({})", error.kind());
         return 5;
+    }
+    if print_external_terminal_handoff(mode) {
+        return 0;
     }
 
     let Ok((current_config, _)) = load_user_config() else {
@@ -208,7 +213,7 @@ fn run_aws_login(plan: &AwsLoginPlan) -> i32 {
     }
 }
 
-fn login_gcp(definition: &ContextDefinition) -> i32 {
+fn login_gcp(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(profile) = definition.gcp() else {
         eprintln!("GCP Provider Profile is not configured");
         return 2;
@@ -234,6 +239,9 @@ fn login_gcp(definition: &ContextDefinition) -> i32 {
     if let Err(error) = std::io::stdout().flush() {
         eprintln!("could not display GCP login preview ({})", error.kind());
         return 5;
+    }
+    if print_external_terminal_handoff(mode) {
+        return 0;
     }
 
     let Ok((current_config, _)) = load_user_config() else {
@@ -274,7 +282,7 @@ fn login_gcp(definition: &ContextDefinition) -> i32 {
     }
 }
 
-fn login_github(definition: &ContextDefinition) -> i32 {
+fn login_github(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let plan = match GithubLoginPlan::new(definition) {
         Ok(plan) => plan,
         Err(failure) => {
@@ -293,6 +301,9 @@ fn login_github(definition: &ContextDefinition) -> i32 {
     if let Err(error) = std::io::stdout().flush() {
         eprintln!("could not display GitHub login preview ({})", error.kind());
         return 5;
+    }
+    if print_external_terminal_handoff(mode) {
+        return 0;
     }
 
     let Ok((current_config, _)) = load_user_config() else {
@@ -365,7 +376,7 @@ fn login_github(definition: &ContextDefinition) -> i32 {
     0
 }
 
-fn login_ssh(definition: &ContextDefinition) -> i32 {
+fn login_ssh(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(profile) = definition.ssh() else {
         eprintln!("SSH Provider Profile is not configured");
         return 2;
@@ -389,6 +400,9 @@ fn login_ssh(definition: &ContextDefinition) -> i32 {
     if let Err(error) = std::io::stdout().flush() {
         eprintln!("could not display SSH login preview ({})", error.kind());
         return 5;
+    }
+    if print_external_terminal_handoff(mode) {
+        return 0;
     }
 
     let runner = match SecureProcessRunner::for_authmux() {
@@ -435,6 +449,16 @@ fn finish_native_login(outcome: ExecutionOutcome, provider: &str) -> Result<(), 
             Err(5)
         }
     }
+}
+
+fn print_external_terminal_handoff(mode: LoginMode) -> bool {
+    if mode != LoginMode::PrintCommand {
+        return false;
+    }
+    println!(
+        "handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command"
+    );
+    true
 }
 
 fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
@@ -513,6 +537,11 @@ fn execute_github(
         match GithubExecutionGuard::authorize(definition.name(), profile, &observation) {
             Ok(selection) => selection,
             Err(failure) => {
+                if failure.requires_reauthentication() {
+                    return emit_reauthentication_event(&ReauthenticationEvent::github(
+                        definition.name(),
+                    ));
+                }
                 eprintln!("{failure}");
                 return failure.exit_code();
             }
@@ -602,11 +631,26 @@ fn execute_aws(selection: ContextSelection, command: &CommandSpec) -> i32 {
             (None, Some(signal)) => terminate_with_signal(signal),
             _ => 126,
         },
+        Err(ExecutionFailure::SessionUnusable {
+            reauthentication_need: ReauthenticationNeed::Required,
+            ..
+        }) => emit_reauthentication_event(&ReauthenticationEvent::aws(&selection.context_name)),
         Err(failure) => {
             eprintln!("{failure}");
             exit_code(&failure)
         }
     }
+}
+
+fn emit_reauthentication_event(event: &ReauthenticationEvent) -> i32 {
+    match event.render_json() {
+        Ok(event) => eprint!("{event}"),
+        Err(failure) => {
+            eprintln!("{failure}");
+            return 5;
+        }
+    }
+    10
 }
 
 fn execute_gcp(
@@ -1307,6 +1351,7 @@ enum CliCommand {
     Login {
         selection: ContextSelection,
         provider: Option<ProviderSelection>,
+        mode: LoginMode,
     },
     Doctor {
         selection: ContextSelection,
@@ -1321,6 +1366,12 @@ enum ProviderSelection {
     Ssh,
     Gcp,
     Github,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LoginMode {
+    Execute,
+    PrintCommand,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1368,10 +1419,13 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
                 require_active_transport,
             },
         ),
-        Some("login") => parse_login(&arguments).map(|(selection, provider)| CliCommand::Login {
-            selection,
-            provider,
-        }),
+        Some("login") => {
+            parse_login(&arguments).map(|(selection, provider, mode)| CliCommand::Login {
+                selection,
+                provider,
+                mode,
+            })
+        }
         Some("doctor") => {
             parse_doctor(&arguments).map(|(selection, provider, format)| CliCommand::Doctor {
                 selection,
@@ -1385,8 +1439,9 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
 
 fn parse_login(
     arguments: &[OsString],
-) -> Result<(ContextSelection, Option<ProviderSelection>), String> {
-    const USAGE: &str = "usage: authmux login <context> [--provider <aws|gcp|github|ssh>]";
+) -> Result<(ContextSelection, Option<ProviderSelection>, LoginMode), String> {
+    const USAGE: &str =
+        "usage: authmux login <context> [--provider <aws|gcp|github|ssh>] [--print-command]";
     let context_name = arguments
         .get(1)
         .and_then(|argument| argument.to_str())
@@ -1394,21 +1449,33 @@ fn parse_login(
         .ok_or_else(|| USAGE.to_owned())?
         .to_owned();
 
-    let provider = match arguments.len() {
-        2 => None,
-        4 if arguments.get(2).and_then(|argument| argument.to_str()) == Some("--provider") => {
-            match arguments.get(3).and_then(|argument| argument.to_str()) {
-                Some("aws") => Some(ProviderSelection::Aws),
-                Some("gcp") => Some(ProviderSelection::Gcp),
-                Some("ssh") => Some(ProviderSelection::Ssh),
-                Some("github") => Some(ProviderSelection::Github),
-                _ => return Err(USAGE.to_owned()),
+    let mut provider = None;
+    let mut mode = LoginMode::Execute;
+    let mut index = 2;
+    while index < arguments.len() {
+        match arguments.get(index).and_then(|argument| argument.to_str()) {
+            Some("--provider") if provider.is_none() => {
+                provider = match arguments
+                    .get(index + 1)
+                    .and_then(|argument| argument.to_str())
+                {
+                    Some("aws") => Some(ProviderSelection::Aws),
+                    Some("gcp") => Some(ProviderSelection::Gcp),
+                    Some("ssh") => Some(ProviderSelection::Ssh),
+                    Some("github") => Some(ProviderSelection::Github),
+                    _ => return Err(USAGE.to_owned()),
+                };
+                index += 2;
             }
+            Some("--print-command") if mode == LoginMode::Execute => {
+                mode = LoginMode::PrintCommand;
+                index += 1;
+            }
+            _ => return Err(USAGE.to_owned()),
         }
-        _ => return Err(USAGE.to_owned()),
-    };
+    }
 
-    Ok((ContextSelection::Explicit(context_name), provider))
+    Ok((ContextSelection::Explicit(context_name), provider, mode))
 }
 
 fn parse_context_command(arguments: &[OsString]) -> Result<CliCommand, String> {

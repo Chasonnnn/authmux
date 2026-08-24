@@ -18,6 +18,7 @@ const STATUS_SCHEMA_VERSION: u32 = 3;
 const CONTEXT_LIST_SCHEMA_VERSION: u32 = 2;
 const DOCTOR_SCHEMA_VERSION: u32 = 1;
 const ALL_STATUS_SCHEMA_VERSION: u32 = 1;
+const EXEC_EVENT_SCHEMA_VERSION: u32 = 1;
 
 pub struct StatusReport {
     context: String,
@@ -38,6 +39,67 @@ pub struct DoctorReport {
     result: &'static str,
     provider_contacted: bool,
     checks: Vec<DoctorReportCheck>,
+}
+
+pub struct ReauthenticationEvent {
+    context: String,
+    provider: &'static str,
+}
+
+#[derive(Serialize)]
+struct ReauthenticationDocument<'a> {
+    schema_version: u32,
+    event: &'static str,
+    context: &'a str,
+    provider: &'static str,
+    login_argv: [&'a str; 6],
+    retry: &'static str,
+}
+
+impl ReauthenticationEvent {
+    #[must_use]
+    pub fn aws(context: impl Into<String>) -> Self {
+        Self::new(context, "aws")
+    }
+
+    #[must_use]
+    pub fn github(context: impl Into<String>) -> Self {
+        Self::new(context, "github")
+    }
+
+    fn new(context: impl Into<String>, provider: &'static str) -> Self {
+        Self {
+            context: context.into(),
+            provider,
+        }
+    }
+
+    /// Serializes one machine-readable agent continuity event.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sanitized failure if the fixed event cannot be serialized.
+    pub fn render_json(&self) -> Result<String, PresentationFailure> {
+        let document = ReauthenticationDocument {
+            schema_version: EXEC_EVENT_SCHEMA_VERSION,
+            event: "reauthentication_required",
+            context: &self.context,
+            provider: self.provider,
+            login_argv: [
+                "authmux",
+                "login",
+                &self.context,
+                "--provider",
+                self.provider,
+                "--print-command",
+            ],
+            retry: "original_command_once",
+        };
+        let mut json = serde_json::to_string(&document)
+            .map_err(|_| PresentationFailure::new("could not serialize execution event"))?;
+        json.push('\n');
+        Ok(json)
+    }
 }
 
 #[derive(Serialize)]

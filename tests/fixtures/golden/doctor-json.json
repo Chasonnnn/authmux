@@ -2,7 +2,7 @@
   "schema_version": 1,
   "command": "doctor",
   "context": "crm",
-  "result": "pass",
+  "result": "warning",
   "provider_contacted": false,
   "checks": [
     {
@@ -19,6 +19,11 @@
       "id": "aws_profile_identity",
       "outcome": "pass",
       "summary": "configured account matches expected identity"
+    },
+    {
+      "id": "session_continuity",
+      "outcome": "warning",
+      "summary": "native AWS execution may renew Credentials, but the parent Session lifetime is not observed"
     }
   ]
 }

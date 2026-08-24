@@ -25,6 +25,7 @@ pub struct GithubExecutionGuard;
 pub struct GithubGuardFailure {
     message: String,
     exit_code: i32,
+    reauthentication_required: bool,
 }
 
 impl GithubLoginPlan {
@@ -123,17 +124,28 @@ impl GithubExecutionGuard {
         profile: &GithubProviderDefinition,
         observation: &StatusObservation,
     ) -> Result<ExecutionSelection, GithubGuardFailure> {
-        if observation.identity_match() != IdentityMatch::Match {
+        if observation.identity_match() == IdentityMatch::Mismatch {
             return Err(GithubGuardFailure::new(
                 "refusing child execution: GitHub identity does not match the Expected Identity",
                 4,
             ));
         }
+        if observation.usability() != SessionUsability::Usable
+            && observation.reauthentication_need() == ReauthenticationNeed::Required
+        {
+            return Err(GithubGuardFailure::reauthentication_required(format!(
+                "refusing child execution: GitHub Session is not usable; run `authmux login {context_name} --provider github`"
+            )));
+        }
+        if observation.identity_match() != IdentityMatch::Match {
+            return Err(GithubGuardFailure::new(
+                "refusing child execution: GitHub identity match could not be established",
+                4,
+            ));
+        }
         if observation.usability() != SessionUsability::Usable {
             return Err(GithubGuardFailure::new(
-                format!(
-                    "refusing child execution: GitHub Session is not usable; run `authmux login {context_name} --provider github`"
-                ),
+                "refusing child execution: GitHub Session Usability could not be established",
                 1,
             ));
         }
@@ -164,12 +176,26 @@ impl GithubGuardFailure {
         Self {
             message: message.into(),
             exit_code,
+            reauthentication_required: false,
+        }
+    }
+
+    fn reauthentication_required(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 10,
+            reauthentication_required: true,
         }
     }
 
     #[must_use]
     pub const fn exit_code(&self) -> i32 {
         self.exit_code
+    }
+
+    #[must_use]
+    pub const fn requires_reauthentication(&self) -> bool {
+        self.reauthentication_required
     }
 }
 

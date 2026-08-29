@@ -42,10 +42,12 @@ malformed event stops without another login, identity switch, or fallback.
 
 AWS recognizes a bounded set of expired and missing-session signatures from
 the capped STS preflight. Unknown, malformed, unreachable, or sensitive output
-remains a sanitized provider failure. GitHub uses its typed unusable-Session
-result. GCP remains child-owned: authmux does not capture arbitrary child
-output or add a resource-specific probe merely to classify Reauthentication.
-SSH retains its explicit reusable-transport contract.
+remains a sanitized provider failure. A bounded AWS endpoint-connection
+signature requests network access and retry without suggesting
+Reauthentication. GitHub uses its typed unusable-Session result. GCP remains
+child-owned: authmux does not capture arbitrary child output or add a
+resource-specific probe merely to classify Reauthentication. SSH retains its
+explicit reusable-transport contract.
 
 Work expected to outlive a human Session uses repository-approved OIDC or
 workload identity for deployment and sanitized log retrieval. Authmux may guard

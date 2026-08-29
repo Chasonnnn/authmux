@@ -154,7 +154,7 @@ Continuity remains provider-specific:
 
 | Provider | Continuity behavior |
 |---|---|
-| AWS | The native CLI may renew credentials during the guarded STS preflight. Recognized expired or missing Sessions emit the structured event. |
+| AWS | The native CLI may renew Credentials during the guarded STS preflight. Recognized expired or missing Sessions emit the structured event. Endpoint failures request network access without suggesting Reauthentication. |
 | Google Cloud | The gcloud or ADC child owns refresh. Authmux does not capture arbitrary child output or claim that a generic child failure is Reauthentication. |
 | GitHub | An unusable provider-validated Session emits the structured event; Reauthentication remains interactive. |
 | SSH | OpenSSH owns transport reuse. A keepalive or ControlMaster is not Credential renewal and can lapse independently. |

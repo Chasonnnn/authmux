@@ -90,6 +90,11 @@ where
             ));
         }
         if output.exit_code() != 0 {
+            if aws_connectivity_failure(output.stderr()) {
+                return Err(ProviderFailure::sanitized(
+                    "AWS identity observation could not reach the provider; allow network access and retry",
+                ));
+            }
             if let Some(reason) = aws_reauthentication_reason(output.stderr()) {
                 return Ok(StatusObservation::unusable_without_identity(
                     reason,
@@ -98,7 +103,7 @@ where
                 ));
             }
             return Err(ProviderFailure::sanitized(
-                "AWS identity observation failed; run `authmux login` for this context",
+                "AWS identity observation failed without evidence that Reauthentication is required",
             ));
         }
 
@@ -118,6 +123,13 @@ where
     ) -> Result<ExecutionSelection, ProviderFailure> {
         Ok(ExecutionSelection::aws_profile(context.provider_profile()))
     }
+}
+
+fn aws_connectivity_failure(stderr: &[u8]) -> bool {
+    str::from_utf8(stderr).ok().is_some_and(|diagnostic| {
+        let diagnostic = diagnostic.to_ascii_lowercase();
+        diagnostic.contains("could not connect to the endpoint url")
+    })
 }
 
 fn aws_reauthentication_reason(stderr: &[u8]) -> Option<ObservationReason> {

@@ -64,6 +64,10 @@ GCP child failures do not produce this event because authmux cannot safely
 classify arbitrary child output. Do not infer Reauthentication from a generic
 nonzero child exit or retry it automatically.
 
+If AWS identity observation reports that it could not reach the provider, do
+not start login. Request network access for the preserved guarded command and
+retry it once. Stop if the network-enabled retry fails; do not bypass authmux.
+
 ## Command and approval boundaries
 
 - Run a literal leaf command, not `authmux exec -- sh`, `bash`, `zsh`, `env`,

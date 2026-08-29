@@ -69,6 +69,38 @@ fn exec_emits_a_structured_reauthentication_event_for_an_expired_aws_session() {
 }
 
 #[test]
+fn exec_reports_network_access_without_recommending_reauthentication() {
+    let fixture = FixtureDirectory::new("network-unreachable");
+    let bin_directory = fixture.configure_unreachable_aws();
+    let marker = fixture.path.join("child-ran");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+        .args([
+            "exec",
+            "--context",
+            "crm",
+            "--",
+            "/usr/bin/touch",
+            marker.to_str().expect("fixture path is Unicode"),
+        ])
+        .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+        .output()
+        .expect("authmux runs");
+
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert_eq!(output.status.code(), Some(5), "stderr: {stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(!marker.exists(), "failed preflight must block the child");
+    assert_eq!(
+        stderr,
+        "provider observation failed: AWS identity observation could not reach the provider; allow network access and retry\n"
+    );
+    assert!(!stderr.contains("login"));
+    assert!(!stderr.contains("identity.fixture.invalid"));
+}
+
+#[test]
 fn exec_runs_a_matching_context_with_the_child_exit_code() {
     let fixture = FixtureDirectory::new("matching");
     let bin_directory = fixture.configure_aws("111111111111");
@@ -434,6 +466,41 @@ impl FixtureDirectory {
              exit 64\n",
         )
         .expect("fictional expired AWS fixture is written");
+        let mut permissions = fs::metadata(&aws)
+            .expect("fixture metadata is readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&aws, permissions).expect("fictional aws fixture is executable");
+
+        fs::write(
+            config_directory.join("config.toml"),
+            "version = 1\n\
+             [contexts.crm.providers.aws]\n\
+             profile = \"crm-development\"\n\
+             expected_account = \"111111111111\"\n",
+        )
+        .expect("fictional user config is written");
+
+        bin_directory
+    }
+
+    fn configure_unreachable_aws(&self) -> PathBuf {
+        let bin_directory = self.path.join("bin");
+        let config_directory = self.path.join("config").join("authmux");
+        fs::create_dir_all(&bin_directory).expect("fixture bin directory is created");
+        fs::create_dir_all(&config_directory).expect("fixture config directory is created");
+
+        let aws = bin_directory.join("aws");
+        fs::write(
+            &aws,
+            "#!/bin/sh\n\
+             if [ \"$1 $2 $3 $4 $5 $6 $7 $8\" = \"sts get-caller-identity --query Account --output text --no-cli-pager --no-cli-auto-prompt\" ]; then\n\
+               printf 'Could not connect to the endpoint URL: \"https://identity.fixture.invalid/\"\\n' >&2\n\
+               exit 255\n\
+             fi\n\
+             exit 64\n",
+        )
+        .expect("fictional unreachable AWS fixture is written");
         let mut permissions = fs::metadata(&aws)
             .expect("fixture metadata is readable")
             .permissions();

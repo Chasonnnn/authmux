@@ -95,7 +95,7 @@ fn provider_failure_does_not_expose_native_output() {
 
     assert_eq!(
         diagnostic,
-        "AWS identity observation failed; run `authmux login` for this context"
+        "AWS identity observation failed without evidence that Reauthentication is required"
     );
     assert!(!diagnostic.contains("AKIA1111111111111111"));
     assert!(!diagnostic.contains("/fictional/private/path"));
@@ -156,7 +156,7 @@ fn unreachable_provider_evidence_remains_a_sanitized_failure() {
 
     assert_eq!(
         failure.to_string(),
-        "AWS identity observation failed; run `authmux login` for this context"
+        "AWS identity observation could not reach the provider; allow network access and retry"
     );
     assert!(!failure.to_string().contains("identity.fixture.invalid"));
 }

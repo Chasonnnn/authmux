@@ -68,6 +68,14 @@ If AWS identity observation reports that it could not reach the provider, do
 not start login. Request network access for the preserved guarded command and
 retry it once. Stop if the network-enabled retry fails; do not bypass authmux.
 
+## Native Git
+
+Run native `git fetch`, `git pull`, and `git push` directly through the
+repository's configured Git/SSH transport. Never require an authmux SSH
+Provider Profile or SSH status check for a Git remote, including
+`git@github.com` remotes. This is not an authmux bypass: authmux has no raw-Git
+selector contract and does not manage Git authentication.
+
 ## Command and approval boundaries
 
 - Run a literal leaf command, not `authmux exec -- sh`, `bash`, `zsh`, `env`,
@@ -88,8 +96,6 @@ retry it once. Stop if the network-enabled retry fails; do not bypass authmux.
   `authmux status --context CONTEXT --provider ssh --require-active-transport`;
   after it passes, use the repository's native SSH host alias. If it fails for
   inactivity, use the external-terminal login handoff above.
-- Native `git fetch`, `pull`, and `push` continue through repository Git/SSH
-  configuration until authmux has a tested raw-Git selector contract.
 - For unattended deployment or log monitoring that may exceed a human Session,
   use the repository's approved OIDC or workload-identity workflow. Do not keep
   a user Session alive with a timer, create static cloud keys, or launch the

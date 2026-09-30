@@ -107,6 +107,12 @@ are removed. Authmux rejects GitHub CLI plaintext-token fallback; configure a
 supported system credential store instead. GitHub execution accepts only `gh`;
 raw `git` authentication is not selected by `GH_CONFIG_DIR` and fails closed.
 
+For GitHub work inside a repository bound to AWS or GCP, select a configured
+GitHub-only context explicitly, as above. `authmux context list --json` shows
+the declared providers and Expected Identities without contacting them. A `gh`
+command with no GitHub Provider Profile fails before any provider probe; cloud
+login cannot unblock it. The repository's cloud binding stays in place.
+
 JSON output follows the checked-in, versioned
 [`status-v3` schema](docs/schemas/status-v3.schema.json). Human and JSON reports
 are rendered from the same typed observation; neither includes raw provider

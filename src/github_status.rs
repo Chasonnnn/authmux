@@ -95,6 +95,25 @@ impl GithubLoginPlan {
 }
 
 impl GithubExecutionGuard {
+    /// Requires a GitHub profile for `gh` before another provider can observe
+    /// its session or supply the child's selectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns a usage failure when `gh` targets a context without GitHub.
+    pub fn validate_context(
+        command: &CommandSpec,
+        definition: &ContextDefinition,
+    ) -> Result<(), GithubGuardFailure> {
+        if is_gh(command) && definition.github().is_none() {
+            return Err(GithubGuardFailure::new(
+                "refusing child execution: gh requires a GitHub Provider Profile; select a configured GitHub context with --context (see `authmux context list`)",
+                2,
+            ));
+        }
+        Ok(())
+    }
+
     /// Rejects commands whose GitHub authentication is not selected by
     /// `GH_CONFIG_DIR` before any provider contact occurs.
     ///
@@ -102,10 +121,7 @@ impl GithubExecutionGuard {
     ///
     /// Returns a usage failure for every non-`gh` child.
     pub fn validate_command(command: &CommandSpec) -> Result<(), GithubGuardFailure> {
-        let github_cli = Path::new(command.program())
-            .file_name()
-            .is_some_and(|name| name == "gh");
-        if !github_cli {
+        if !is_gh(command) {
             return Err(GithubGuardFailure::new(
                 "GitHub execution supports only the gh CLI; raw Git authentication is not selected by GH_CONFIG_DIR",
                 2,
@@ -169,6 +185,12 @@ impl GithubExecutionGuard {
         }
         Ok(())
     }
+}
+
+fn is_gh(command: &CommandSpec) -> bool {
+    Path::new(command.program())
+        .file_name()
+        .is_some_and(|name| name == "gh")
 }
 
 impl GithubGuardFailure {

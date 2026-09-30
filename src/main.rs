@@ -484,6 +484,11 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
         }
     };
 
+    if let Err(failure) = GithubExecutionGuard::validate_context(command, &definition) {
+        eprintln!("{failure}");
+        return failure.exit_code();
+    }
+
     match (
         definition.aws(),
         definition.gcp(),

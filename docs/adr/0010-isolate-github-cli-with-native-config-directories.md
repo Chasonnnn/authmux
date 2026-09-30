@@ -64,6 +64,15 @@ update notices, and disabled GitHub CLI telemetry. Ambient `GH_TOKEN`,
 rejected because `GH_CONFIG_DIR` does not select an SSH key or Git credential
 helper.
 
+A child whose executable basename is `gh` requires a GitHub Provider Profile
+before any provider observation. A cloud-only context returns a usage error
+with an explicit GitHub-context selection action; it must not run AWS STS,
+apply GCP selectors, or request cloud Reauthentication. This applies to both
+repository bindings and explicit `--context` selection. Authmux does not infer
+or switch to another context. Agents may explicitly select the one configured
+GitHub-only context for the target host when no conflicting GitHub identity is
+required, including inside a cloud-bound repository.
+
 `authmux status --all` observes every configured Provider Profile without a
 Project Binding. Its JSON form is intended for agent preflights. A failed
 provider produces a nonzero aggregate exit without discarding successful

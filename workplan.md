@@ -151,6 +151,9 @@ Behavioral rules:
   normal work path and does not require a preceding `status` or `doctor` call.
   A safely classified interactive Reauthentication requirement exits `10` with
   one `exec-event-v1` JSON object on stderr; it never starts login implicitly.
+- `gh` requires a GitHub Provider Profile before any provider observation.
+  Cloud-bound repositories use an explicit configured GitHub-only context for
+  GitHub operations; missing GitHub selection must never request cloud login.
 - `--json` has a versioned schema and contains sanitized structured data only.
 
 ## 7. Configuration sketch

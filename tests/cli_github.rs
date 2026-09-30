@@ -167,6 +167,7 @@ fn github_login_can_print_an_external_terminal_handoff_without_starting_native_l
 fn github_exec_validates_identity_then_runs_the_child_with_process_scoped_selection() {
     let fixture = GithubCliFixture::new("exec-success");
     let bin_directory = fixture.configure_gh_exec();
+    let repository = fixture.configure_aws_project(&bin_directory);
 
     let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
         .args([
@@ -179,6 +180,7 @@ fn github_exec_validates_identity_then_runs_the_child_with_process_scoped_select
             "view",
             "fictional/repository",
         ])
+        .current_dir(repository)
         .env("HOME", fixture.home())
         .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
         .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
@@ -201,6 +203,48 @@ fn github_exec_validates_identity_then_runs_the_child_with_process_scoped_select
         )
     );
     assert!(stderr.is_empty());
+    assert!(!fixture.path.join("aws-invocation").exists());
+}
+
+#[test]
+fn github_exec_requires_a_github_context_before_any_aws_probe_or_child() {
+    for explicit_context in [false, true] {
+        let fixture = GithubCliFixture::new("exec-cloud-binding");
+        let bin_directory = fixture.configure_gh("success", "fictional-researcher", "keyring", 0);
+        let repository = fixture.configure_aws_project(&bin_directory);
+        let mut command = Command::new(env!("CARGO_BIN_EXE_authmux"));
+        command.arg("exec");
+        if explicit_context {
+            command.args(["--context", "cloud"]);
+        }
+        // Both PATH lookup and an absolute executable must enforce this boundary.
+        let program = if explicit_context {
+            bin_directory.join("gh")
+        } else {
+            PathBuf::from("gh")
+        };
+        let output = command
+            .arg("--")
+            .arg(program)
+            .args(["pr", "list"])
+            .current_dir(repository)
+            .env("HOME", fixture.home())
+            .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+            .output()
+            .expect("authmux runs");
+
+        let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+        assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            stderr,
+            "refusing child execution: gh requires a GitHub Provider Profile; select a configured GitHub context with --context (see `authmux context list`)\n"
+        );
+        assert!(!fixture.path.join("aws-invocation").exists());
+        assert!(!fixture.invocation().exists());
+        assert!(!stderr.contains("AKIA1111111111111111"));
+    }
 }
 
 #[test]
@@ -511,6 +555,38 @@ impl GithubCliFixture {
         .expect("fictional gh is written");
         set_mode(&executable, 0o700);
         bin_directory
+    }
+
+    fn configure_aws_project(&self, bin_directory: &Path) -> PathBuf {
+        let config_path = self.authmux_config_root().join("authmux/config.toml");
+        let mut config = fs::read_to_string(&config_path).expect("fixture config is readable");
+        config.push_str(
+            "\n[contexts.cloud.providers.aws]\n\
+             profile = \"fictional-cloud\"\n\
+             expected_account = \"111111111111\"\n",
+        );
+        fs::write(config_path, config).expect("cloud context is written");
+        let aws = bin_directory.join("aws");
+        fs::write(
+            &aws,
+            format!(
+                "#!/bin/sh\n\
+                 touch '{}'\n\
+                 printf 'Error when retrieving an SSO session: cached session expired; AKIA1111111111111111\\n' >&2\n\
+                 exit 1\n",
+                self.path.join("aws-invocation").display()
+            ),
+        )
+        .expect("expired AWS fixture is written");
+        set_mode(&aws, 0o700);
+        let repository = self.path.join("repository");
+        fs::create_dir_all(repository.join(".git")).expect("repository marker is created");
+        fs::write(
+            repository.join(".authmux.toml"),
+            "version = 1\n[project]\ncontext = \"cloud\"\n",
+        )
+        .expect("cloud binding is written");
+        repository
     }
 
     fn configure_gh_missing_host(&self) -> PathBuf {

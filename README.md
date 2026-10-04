@@ -64,9 +64,23 @@ provider-validated identity evidence is required.
 Explicit AWS Reauthentication delegates to the native profile mode:
 
 ```console
-authmux login crm --provider aws
-authmux login crm --provider aws --print-command
+authmux aws
+authmux aws --print-command
+authmux aws --context crm
 ```
+
+`authmux aws`, `authmux gh`, `authmux gcloud`, and `authmux empireai` start
+explicit AWS, GitHub, Google Cloud, and SSH login respectively. Each accepts
+`--context NAME` and `--print-command`. Selection uses the explicit context,
+then the repo's matching `project.providers` entry, then `project.context`
+when no provider mapping exists. Missing contexts or providers fail without
+trying another identity. `empireai` uses the selected SSH host alias; it does
+not hardcode a cluster or host.
+
+These are login commands only; extra provider arguments are rejected. The
+existing `authmux login CONTEXT --provider PROVIDER` form remains available.
+`exec`, `status`, and `doctor` retain their existing context selection; use
+`--context NAME` to select a provider's separate context for those commands.
 
 Console-login profiles use `aws login`; IAM Identity Center profiles use
 `aws sso login`. For a role profile, authmux validates the selected role's
@@ -76,7 +90,7 @@ Native success does not by itself claim live Session Usability.
 
 `--print-command` performs the same bounded planning and sanitized preview but
 does not start the native login. Use it from Codex, Claude, CI, or another
-captured agent session, then rerun the same `authmux login` without
+captured agent session, then rerun the same authmux command without
 `--print-command` in a separate user-controlled terminal. This preserves
 process-scoped provider selectors while keeping browser URLs, device codes,
 MFA prompts, and native login output out of the agent transcript. After the
@@ -173,7 +187,7 @@ create static cloud keys or keep a human Session alive indefinitely.
 The implemented AWS-first tracer reads a user-owned context, observes the
 selected account through the native AWS CLI, refuses an Expected Identity
 mismatch, and otherwise creates a process-scoped environment for one child
-command. A repository binding may select only a user-defined context; it cannot
+command. A repository binding may select only user-defined contexts; it cannot
 override providers or commands, is never discovered above the nearest `.git`
 root, and reports its canonical source path through the Config Module. A
 matching child preserves its exit code or terminating Unix signal. Google
@@ -359,15 +373,27 @@ credential_file = "/home/researcher/.config/gcloud/adc/crm.json"
 expected_principal = "workload@example.test"
 ```
 
-Existing AWS-only configuration remains valid. The optional root binding
-contains only:
+Existing version 1 bindings remain valid. The optional root binding can map
+login providers to separate existing contexts:
 
 ```toml
 version = 1
 
 [project]
 context = "crm"
+
+[project.providers]
+aws = "crm"
+github = "github"
+ssh = "empire"
 ```
+
+`project.context` is required and remains the default for existing commands.
+The optional `project.providers` keys are `aws`, `gcp`, `github`, and `ssh`;
+their values are context names, not profiles, credentials, or commands.
+`authmux context show` includes these mappings without contacting providers.
+Upgrade authmux before adding this table: older binaries reject the new
+fields. No changes to user-owned provider definitions are required.
 
 `.authmux.toml` is ignored by this repository's default because project and
 organization names can be sensitive. A project that intentionally shares the
@@ -395,6 +421,7 @@ Start here:
 - [ADR 0009](docs/adr/0009-delegate-aws-login-by-native-profile-mode.md) — explicit native AWS login mode selection
 - [ADR 0011](docs/adr/0011-handoff-interactive-login-outside-agent-sessions.md) — external-terminal login handoff
 - [ADR 0012](docs/adr/0012-native-refresh-and-resumable-agent-continuity.md) — native refresh and resumable agent continuity
+- [ADR 0013](docs/adr/0013-provider-login-shortcuts.md) — per-provider repo login shortcuts
 - [Phase 0 evidence](docs/research/2026-08-03-phase-0-evidence.md) — dated competitor and provider findings
 - [Build-versus-adopt benchmark](docs/research/2026-08-03-build-vs-adopt-benchmark.md) — pinned Atmos and direnv controls
 - [Provider evidence matrix](docs/research/2026-08-03-provider-evidence-matrix.md) — command, selector, side-effect, and sensitivity decisions

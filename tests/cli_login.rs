@@ -519,11 +519,222 @@ fn mixed_context_login_requires_an_explicit_provider_before_spawn() {
     assert!(!fixture.path.join("ssh-ran").exists());
 }
 
+#[test]
+fn login_shortcuts_select_mapped_contexts_from_nested_directories() {
+    for (shortcut, provider, context) in [
+        ("aws", "aws", "aws-console"),
+        ("gcloud", "gcp", "crm"),
+        ("empireai", "ssh", "empire"),
+    ] {
+        let fixture = LoginFixture::new("shortcut");
+        let bin_directory = match provider {
+            "aws" => fixture.configure_aws_console(0),
+            "gcp" => fixture.configure_gcp(0),
+            _ => fixture.configure_ssh(0),
+        };
+        fixture.write_binding(&format!(
+            "version = 1\n[project]\ncontext = \"unused\"\n[project.providers]\n{provider} = \"{context}\"\n"
+        ));
+        let nested = fixture.path.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let output = fixture
+            .command(&bin_directory)
+            .current_dir(nested)
+            .args([shortcut, "--print-command"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{shortcut}: {:?}",
+            output.stderr
+        );
+        assert!(stdout.starts_with(&format!("login: {context}\nprovider: {provider}\n")));
+        assert!(stdout.contains("authmux did not start the native command"));
+        for marker in ["aws-login-ran", "gcloud-ran", "ssh-ran"] {
+            assert!(!fixture.path.join(marker).exists());
+        }
+    }
+}
+
+#[test]
+fn shortcut_uses_default_binding_and_preserves_native_exit_and_environment() {
+    let fixture = LoginFixture::new("shortcut-default");
+    let bin_directory = fixture.configure_ssh(23);
+    fixture.write_binding("version = 1\n[project]\ncontext = \"empire\"\n");
+    let output = fixture
+        .command(&bin_directory)
+        .args(["empireai"])
+        .env("GH_TOKEN", "ghp_fictional_must_not_pass")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(23));
+    assert!(stdout.contains("native argv: empire-alpha\n"));
+    assert!(stdout.contains("inherited GH_TOKEN: absent\n"));
+    assert!(!stdout.contains("ghp_"));
+}
+
+#[test]
+fn shortcut_explicit_context_overrides_mapping_and_works_outside_a_repository() {
+    let fixture = LoginFixture::new("shortcut-explicit");
+    let bin_directory = fixture.configure_ssh(0);
+    for bound in [false, true] {
+        if bound {
+            fixture.write_binding("version = 1\n[project]\ncontext = \"unused\"\n[project.providers]\nssh = \"missing\"\n");
+        }
+        let output = fixture
+            .command(&bin_directory)
+            .args(["empireai", "--print-command", "--context", "empire"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .starts_with("login: empire\n")
+        );
+    }
+    assert!(!fixture.path.join("ssh-ran").exists());
+}
+
+#[test]
+fn shortcut_invalid_mapping_never_falls_back_to_default_context() {
+    let fixture = LoginFixture::new("shortcut-invalid");
+    let bin_directory = fixture.configure_mixed();
+    for (binding, diagnostic) in [
+        (
+            "version = 1\n[project]\ncontext = \"mixed\"\n[project.providers]\nssh = \"missing\"\n",
+            "context is not defined",
+        ),
+        (
+            "version = 1\n[project]\ncontext = \"mixed\"\n[project.providers]\nssh = \"ghp_fictional_secret\"\n",
+            "secret-shaped",
+        ),
+        (
+            "version = 1\n[project]\ncontext = \"mixed\"\n[project.providers]\nssh = \"\"\n",
+            "cannot be empty",
+        ),
+        (
+            "version = 1\n[project]\ncontext = \"mixed\"\n[project.providers]\nssh = \"\\u001b[31munsafe\"\n",
+            "unsafe display",
+        ),
+        (
+            "version = 1\n[project]\ncontext = \"mixed\"\n[project.providers]\ntoken = \"ghp_fictional_secret\"\n",
+            "invalid",
+        ),
+    ] {
+        fixture.write_binding(binding);
+        let output = fixture
+            .command(&bin_directory)
+            .args(["empireai"])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(stderr.contains(diagnostic), "{stderr}");
+        assert!(!stderr.contains("ghp_") && !stderr.contains('\u{1b}'));
+        assert!(output.stdout.is_empty());
+        assert!(!fixture.path.join("ssh-ran").exists());
+    }
+    fixture.write_binding("version = 1\n[project]\ncontext = \"mixed\"\n");
+    let output = fixture
+        .command(&bin_directory)
+        .args(["gh"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("does not define the selected provider")
+    );
+    assert!(!fixture.path.join("ssh-ran").exists());
+}
+
+#[test]
+fn shortcut_rejects_extra_arguments_before_any_provider_action() {
+    let fixture = LoginFixture::new("shortcut-args");
+    let bin_directory = fixture.configure_ssh(0);
+    fixture.write_binding("version = 1\n[project]\ncontext = \"empire\"\n");
+    for args in [
+        vec!["empireai", "--", "arbitrary-command"],
+        vec!["empireai", "--provider", "aws"],
+        vec!["empireai", "--context"],
+        vec!["empireai", "--context", "--print-command"],
+        vec!["empireai", "--print-command", "--print-command"],
+        vec!["empireai", "--context", "empire", "--context", "empire"],
+    ] {
+        let output = fixture.command(&bin_directory).args(args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .starts_with("usage:")
+        );
+        assert!(!fixture.path.join("ssh-ran").exists());
+    }
+}
+
+#[test]
+fn shortcut_refuses_binding_drift_during_login_planning() {
+    for late in [false, true] {
+        let fixture = LoginFixture::new("shortcut-drift");
+        let bin_directory = fixture.configure_aws_console(0);
+        fixture.write_binding("version = 1\n[project]\ncontext = \"aws-console\"\n[project.providers]\naws = \"aws-console\"\n");
+        let aws = bin_directory.join("aws");
+        let script = fs::read_to_string(&aws).unwrap();
+        let mutation = format!(
+            "#!/bin/sh\nprintf 'version = 1\\n[project]\\ncontext = \"aws-console\"\\n[project.providers]\\naws = \"changed\"\\n' > '{}'\n",
+            fixture.path.join(".authmux.toml").display()
+        );
+        let mutation = if late {
+            format!(
+                "#!/bin/sh\nif [ \"$1 $2 $3\" = \"configure get login_session\" ]; then\nif [ -f '{}' ]; then\n{}else\n: > '{}'\nfi\nfi\n",
+                fixture.path.join("planned").display(),
+                mutation.trim_start_matches("#!/bin/sh\n"),
+                fixture.path.join("planned").display()
+            )
+        } else {
+            mutation
+        };
+        fs::write(aws, script.replacen("#!/bin/sh\n", &mutation, 1)).unwrap();
+        let output = fixture
+            .command(&bin_directory)
+            .args(["aws"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(6), "{:?}", output.stderr);
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("context")
+        );
+        assert!(!fixture.path.join("aws-login-ran").exists());
+    }
+}
+
 struct LoginFixture {
     path: PathBuf,
 }
 
 impl LoginFixture {
+    fn command(&self, bin_directory: &std::path::Path) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_authmux"));
+        command
+            .current_dir(&self.path)
+            .env("HOME", self.path.join("home"))
+            .env("XDG_CONFIG_HOME", self.path.join("config"))
+            .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()));
+        command
+    }
+
+    fn write_binding(&self, source: &str) {
+        fs::create_dir_all(self.path.join(".git")).unwrap();
+        fs::write(self.path.join(".authmux.toml"), source).unwrap();
+    }
+
     fn new(label: &str) -> Self {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)

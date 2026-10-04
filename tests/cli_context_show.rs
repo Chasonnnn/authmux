@@ -57,7 +57,7 @@ fn context_show_reports_project_binding_provenance_from_a_nested_directory() {
     let binding_source = fixture.path.join(".authmux.toml");
     fs::write(
         &binding_source,
-        "version = 1\n[project]\ncontext = \"crm\"\n",
+        "version = 1\n[project]\ncontext = \"crm\"\n[project.providers]\naws = \"crm\"\n",
     )
     .expect("project binding is written");
     let canonical_root = fs::canonicalize(&fixture.path).expect("fixture path canonicalizes");
@@ -84,6 +84,7 @@ fn context_show_reports_project_binding_provenance_from_a_nested_directory() {
             "context: crm\n\
              selection: project binding\n\
              binding source: {}\n\
+             login context (aws): crm\n\
              description: Fictional CRM project\n\
              definition source: {}\n\
              aws profile: crm-development\n\

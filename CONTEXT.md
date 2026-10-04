@@ -48,8 +48,9 @@ together for one body of work.
 _Avoid_: Workspace, environment, account bundle
 
 **Project Binding**:
-A repository-local association between a project and an Authentication
-Context.
+A repository-local association with a default Authentication Context and
+optional per-provider login context mappings. Each mapping names an existing
+user-owned Authentication Context; it contains no Provider Profile overrides.
 _Avoid_: Project credential, project login
 
 **Session**:

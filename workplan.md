@@ -54,7 +54,7 @@ machine and already uses the providers' supported CLIs.
 - One cross-platform Rust binary for macOS and Linux.
 - User configuration plus optional repository-local `.authmux.toml`.
 - Commands: `status`, `doctor`, `login`, `exec`, `context list`, and
-  `context show`.
+  `context show`, plus `aws`, `gh`, `gcloud`, and `empireai` login shortcuts.
 - Normalized status model with observation time and evidence level.
 - Initial Provider Adapters:
   - AWS via supported `aws` profile/session commands.
@@ -122,6 +122,7 @@ or a Credential.
 authmux status [--all | --context NAME] [--provider NAME] [--json] [--require-active-transport]
 authmux doctor [--context NAME] [--provider NAME] [--json]
 authmux login <context> [--provider NAME] [--print-command]
+authmux <aws|gh|gcloud|empireai> [--context NAME] [--print-command]
 authmux exec [--context NAME] -- <program> [args...]
 authmux context list [--json]
 authmux context show [--context NAME]
@@ -131,6 +132,11 @@ Behavioral rules:
 
 - Repository binding is used when `--context` is omitted; ambiguity is an
   error, not an interactive guess.
+- Login shortcuts select one provider through the repo's optional
+  `project.providers` mapping, using `project.context` only when the provider
+  has no mapping. Explicit `--context` takes precedence. Invalid mappings fail
+  without a fallback. `context show` lists the mappings; `exec`, `status`, and
+  `doctor` keep their existing selection contract. See ADR 0013.
 - `status` reports observations and exits nonzero only for command/config
   failure. Individual invalid sessions remain data in the report. SSH status
   observes only an explicitly configured local control socket per ADR 0005.
@@ -198,12 +204,18 @@ version = 1
 
 [project]
 context = "crm"
+
+[project.providers]
+aws = "crm"
+github = "github"
+ssh = "empire"
 ```
 
 Configuration layers, from lowest to highest precedence:
 
 1. User config defines reusable Authentication Contexts.
-2. Repository config may only bind the project to a user-defined context; it
+2. Repository config may only bind the project to user-defined contexts,
+   including optional per-provider login mappings; it
    cannot define or override Provider Profiles or Expected Identities.
 3. Explicit CLI flags select a context for one invocation.
 
@@ -453,6 +465,9 @@ Deliverables:
 
 - [x] Implement `login` plans for all initial providers: AWS, GCP, GitHub, and
   SSH.
+- [x] Add repo-bound provider login shortcuts with separate context mappings,
+  explicit-context precedence, sanitized configuration failures, and
+  pre-spawn mapping revalidation.
 - [x] Delegate explicit AWS Reauthentication to `aws login` or `aws sso login`
   from bounded local profile metadata, including guarded source-profile
   traversal for selected role profiles under ADR 0009.

@@ -108,30 +108,48 @@ fn github_login_delegates_to_gh_and_validates_the_selected_login_afterward() {
     let fixture = GithubCliFixture::new("login-success");
     let bin_directory = fixture.configure_gh_login();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
-        .args(["login", "github", "--provider", "github"])
-        .env("HOME", fixture.home())
-        .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
-        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
-        .env("GH_TOKEN", "ghp_fictional_must_not_pass")
-        .output()
-        .expect("authmux runs");
+    let repository = fixture.configure_aws_project(&bin_directory);
+    fs::write(
+        repository.join(".authmux.toml"),
+        r#"version = 1
+[project]
+context = "cloud"
+[project.providers]
+github = "github"
+"#,
+    )
+    .unwrap();
+    for args in [vec!["login", "github", "--provider", "github"], vec!["gh"]] {
+        let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+            .current_dir(&repository)
+            .args(args)
+            .env("HOME", fixture.home())
+            .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+            .env("GH_TOKEN", "ghp_fictional_must_not_pass")
+            .output()
+            .expect("authmux runs");
 
-    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert!(stdout.starts_with(
-        "login: github\n\
+        let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+        assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+        assert!(stdout.starts_with(
+            "login: github\n\
          provider: github\n\
          GitHub hostname: github.com\n\
          expected GitHub login: fictional-researcher\n\
          native command: gh auth login --hostname github.com --web --skip-ssh-key\n"
-    ));
-    assert!(stdout.contains("native login GH_TOKEN=absent\n"));
-    assert!(stdout.contains("post-login identity match: match\n"));
-    assert!(stdout.contains("post-login session usability: usable\n"));
-    assert!(!stdout.contains("ghp_"));
-    assert!(stderr.is_empty());
+        ));
+        assert!(stdout.contains("native login GH_TOKEN=absent\n"));
+        assert!(stdout.contains("post-login identity match: match\n"));
+        assert!(stdout.contains("post-login session usability: usable\n"));
+        assert!(!stdout.contains("ghp_"));
+        assert!(stderr.is_empty());
+        assert!(
+            !fixture.path.join("aws-invocation").exists(),
+            "GitHub login must not touch AWS"
+        );
+    }
 }
 
 #[test]
@@ -139,28 +157,49 @@ fn github_login_can_print_an_external_terminal_handoff_without_starting_native_l
     let fixture = GithubCliFixture::new("login-print-command");
     let bin_directory = fixture.configure_gh_login();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
-        .args(["login", "github", "--provider", "github", "--print-command"])
-        .env("HOME", fixture.home())
-        .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
-        .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
-        .env("GH_TOKEN", "ghp_fictional_must_not_pass")
-        .output()
-        .expect("authmux runs");
+    let repository = fixture.configure_aws_project(&bin_directory);
+    fs::write(
+        repository.join(".authmux.toml"),
+        r#"version = 1
+[project]
+context = "cloud"
+[project.providers]
+github = "github"
+"#,
+    )
+    .unwrap();
+    for args in [
+        vec!["login", "github", "--provider", "github", "--print-command"],
+        vec!["gh", "--print-command"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+            .current_dir(&repository)
+            .args(args)
+            .env("HOME", fixture.home())
+            .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+            .env("GH_TOKEN", "ghp_fictional_must_not_pass")
+            .output()
+            .expect("authmux runs");
 
-    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert_eq!(
-        stdout,
-        "login: github\n\
+        let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+        assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+        assert_eq!(
+            stdout,
+            "login: github\n\
          provider: github\n\
          GitHub hostname: github.com\n\
          expected GitHub login: fictional-researcher\n\
          native command: gh auth login --hostname github.com --web --skip-ssh-key\n\
          handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
-    );
-    assert!(stderr.is_empty());
+        );
+        assert!(stderr.is_empty());
+        assert!(
+            !fixture.path.join("aws-invocation").exists(),
+            "GitHub login must not touch AWS"
+        );
+    }
 }
 
 #[test]

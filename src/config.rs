@@ -96,11 +96,14 @@ struct ProjectConfig {
 #[serde(deny_unknown_fields)]
 struct ProjectBindingConfig {
     context: String,
+    #[serde(default)]
+    providers: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectBinding {
     context_name: String,
+    provider_contexts: BTreeMap<String, String>,
     source: PathBuf,
 }
 
@@ -377,24 +380,25 @@ impl ProjectBinding {
                 "unsupported project configuration version; expected version 1",
             ));
         }
-        if looks_secret_shaped(&config.project.context) {
+        if config
+            .project
+            .providers
+            .keys()
+            .any(|provider| !matches!(provider.as_str(), "aws" | "gcp" | "github" | "ssh"))
+        {
             return Err(ConfigFailure::new(
-                "project configuration contains a secret-shaped context value",
+                "project provider mapping is invalid; use aws, gcp, github, or ssh",
             ));
         }
-        if config.project.context.trim().is_empty() {
-            return Err(ConfigFailure::new(
-                "project configuration context cannot be empty",
-            ));
-        }
-        if has_unsafe_display_characters(&config.project.context) {
-            return Err(ConfigFailure::new(
-                "project configuration context contains unsafe display characters",
-            ));
+        for context in
+            std::iter::once(&config.project.context).chain(config.project.providers.values())
+        {
+            validate_project_context(context)?;
         }
 
         Ok(Self {
             context_name: config.project.context,
+            provider_contexts: config.project.providers,
             source,
         })
     }
@@ -404,10 +408,35 @@ impl ProjectBinding {
         &self.context_name
     }
 
+    /// Explicit login context mappings, keyed by canonical provider name.
+    #[must_use]
+    pub fn provider_contexts(&self) -> &BTreeMap<String, String> {
+        &self.provider_contexts
+    }
+
     #[must_use]
     pub fn source(&self) -> &Path {
         &self.source
     }
+}
+
+fn validate_project_context(context: &str) -> Result<(), ConfigFailure> {
+    if looks_secret_shaped(context) {
+        return Err(ConfigFailure::new(
+            "project configuration contains a secret-shaped context value",
+        ));
+    }
+    if context.trim().is_empty() {
+        return Err(ConfigFailure::new(
+            "project configuration context cannot be empty",
+        ));
+    }
+    if has_unsafe_display_characters(context) {
+        return Err(ConfigFailure::new(
+            "project configuration context contains unsafe display characters",
+        ));
+    }
+    Ok(())
 }
 
 impl UserConfig {

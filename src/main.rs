@@ -48,7 +48,7 @@ fn run() -> i32 {
             selection,
             provider,
             mode,
-        }) => login(selection, provider, mode),
+        }) => login(&selection, provider, mode),
         Ok(CliCommand::Doctor {
             selection,
             provider,
@@ -61,8 +61,12 @@ fn run() -> i32 {
     }
 }
 
-fn login(selection: ContextSelection, provider: Option<ProviderSelection>, mode: LoginMode) -> i32 {
-    let selection = match resolve_selection(selection) {
+fn login(
+    selection: &ContextSelection,
+    provider: Option<ProviderSelection>,
+    mode: LoginMode,
+) -> i32 {
+    let resolved = match resolve_selection(selection.clone()) {
         Ok(selection) => selection,
         Err(message) => {
             eprintln!("{message}");
@@ -76,7 +80,7 @@ fn login(selection: ContextSelection, provider: Option<ProviderSelection>, mode:
             return 2;
         }
     };
-    let definition = match config.resolve_context_definition(&selection.context_name) {
+    let definition = match config.resolve_context_definition(&resolved.context_name) {
         Ok(definition) => definition,
         Err(failure) => {
             eprintln!("{failure}");
@@ -92,14 +96,28 @@ fn login(selection: ContextSelection, provider: Option<ProviderSelection>, mode:
     };
 
     match provider {
-        ProviderSelection::Aws => login_aws(&definition, mode),
-        ProviderSelection::Ssh => login_ssh(&definition, mode),
-        ProviderSelection::Gcp => login_gcp(&definition, mode),
-        ProviderSelection::Github => login_github(&definition, mode),
+        ProviderSelection::Aws => login_aws(selection, &definition, mode),
+        ProviderSelection::Ssh => login_ssh(selection, &definition, mode),
+        ProviderSelection::Gcp => login_gcp(selection, &definition, mode),
+        ProviderSelection::Github => login_github(selection, &definition, mode),
     }
 }
 
-fn login_aws(definition: &ContextDefinition, mode: LoginMode) -> i32 {
+fn resolve_login_again(
+    selection: &ContextSelection,
+    expected_name: &str,
+) -> Result<ContextDefinition, ()> {
+    let current = resolve_selection(selection.clone()).map_err(|_| ())?;
+    if current.context_name != expected_name {
+        return Err(());
+    }
+    let (config, _) = load_user_config().map_err(|_| ())?;
+    config
+        .resolve_context_definition(expected_name)
+        .map_err(|_| ())
+}
+
+fn login_aws(selection: &ContextSelection, definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(context) = definition.aws() else {
         eprintln!("AWS Provider Profile is not configured");
         return 2;
@@ -127,23 +145,6 @@ fn login_aws(definition: &ContextDefinition, mode: LoginMode) -> i32 {
         return 0;
     }
 
-    let Ok((current_config, _)) = load_user_config() else {
-        eprintln!("refusing AWS login: authentication context could not be re-resolved");
-        return 6;
-    };
-    let Ok(current_definition) = current_config.resolve_context_definition(definition.name())
-    else {
-        eprintln!("refusing AWS login: authentication context could not be re-resolved");
-        return 6;
-    };
-    if let Err(failure) = AwsLoginPlan::ensure_context_unchanged(definition, &current_definition) {
-        eprintln!("{failure}");
-        return failure.exit_code();
-    }
-    let Some(current_context) = current_definition.aws() else {
-        eprintln!("refusing AWS login: authentication context could not be re-resolved");
-        return 6;
-    };
     let current_planning_runner = match SecureProcessRunner::for_authmux() {
         Ok(runner) => runner,
         Err(failure) => {
@@ -151,7 +152,7 @@ fn login_aws(definition: &ContextDefinition, mode: LoginMode) -> i32 {
             return 2;
         }
     };
-    let current_plan = match AwsLoginPlanner::new(current_planning_runner).plan(current_context) {
+    let current_plan = match AwsLoginPlanner::new(current_planning_runner).plan(context) {
         Ok(plan) => plan,
         Err(failure) => {
             eprintln!("{failure}");
@@ -160,6 +161,15 @@ fn login_aws(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     };
     if plan != current_plan {
         let failure = authmux::AwsLoginFailure::PlanChanged;
+        eprintln!("{failure}");
+        return failure.exit_code();
+    }
+
+    let Ok(current_definition) = resolve_login_again(selection, definition.name()) else {
+        eprintln!("refusing AWS login: authentication context could not be re-resolved");
+        return 6;
+    };
+    if let Err(failure) = AwsLoginPlan::ensure_context_unchanged(definition, &current_definition) {
         eprintln!("{failure}");
         return failure.exit_code();
     }
@@ -213,7 +223,7 @@ fn run_aws_login(plan: &AwsLoginPlan) -> i32 {
     }
 }
 
-fn login_gcp(definition: &ContextDefinition, mode: LoginMode) -> i32 {
+fn login_gcp(selection: &ContextSelection, definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(profile) = definition.gcp() else {
         eprintln!("GCP Provider Profile is not configured");
         return 2;
@@ -244,12 +254,7 @@ fn login_gcp(definition: &ContextDefinition, mode: LoginMode) -> i32 {
         return 0;
     }
 
-    let Ok((current_config, _)) = load_user_config() else {
-        eprintln!("refusing GCP login: authentication context could not be re-resolved");
-        return 6;
-    };
-    let Ok(current_definition) = current_config.resolve_context_definition(definition.name())
-    else {
+    let Ok(current_definition) = resolve_login_again(selection, definition.name()) else {
         eprintln!("refusing GCP login: authentication context could not be re-resolved");
         return 6;
     };
@@ -282,7 +287,11 @@ fn login_gcp(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     }
 }
 
-fn login_github(definition: &ContextDefinition, mode: LoginMode) -> i32 {
+fn login_github(
+    selection: &ContextSelection,
+    definition: &ContextDefinition,
+    mode: LoginMode,
+) -> i32 {
     let plan = match GithubLoginPlan::new(definition) {
         Ok(plan) => plan,
         Err(failure) => {
@@ -306,11 +315,7 @@ fn login_github(definition: &ContextDefinition, mode: LoginMode) -> i32 {
         return 0;
     }
 
-    let Ok((current_config, _)) = load_user_config() else {
-        return refuse_changed_context();
-    };
-    let Ok(current_definition) = current_config.resolve_context_definition(definition.name())
-    else {
+    let Ok(current_definition) = resolve_login_again(selection, definition.name()) else {
         return refuse_changed_context();
     };
     if let Err(failure) = plan.ensure_unchanged(&current_definition) {
@@ -376,7 +381,7 @@ fn login_github(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     0
 }
 
-fn login_ssh(definition: &ContextDefinition, mode: LoginMode) -> i32 {
+fn login_ssh(selection: &ContextSelection, definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(profile) = definition.ssh() else {
         eprintln!("SSH Provider Profile is not configured");
         return 2;
@@ -403,6 +408,13 @@ fn login_ssh(definition: &ContextDefinition, mode: LoginMode) -> i32 {
     }
     if print_external_terminal_handoff(mode) {
         return 0;
+    }
+
+    let Ok(current_definition) = resolve_login_again(selection, definition.name()) else {
+        return refuse_changed_context();
+    };
+    if current_definition.ssh() != definition.ssh() {
+        return refuse_changed_context();
     }
 
     let runner = match SecureProcessRunner::for_authmux() {
@@ -1256,9 +1268,12 @@ fn print_context(
     println!("context: {}", definition.name());
     match &selection.source {
         SelectionSource::CommandLine => println!("selection: command line"),
-        SelectionSource::ProjectBinding(source) => {
+        SelectionSource::ProjectBinding(binding) => {
             println!("selection: project binding");
-            println!("binding source: {}", render_path(source));
+            println!("binding source: {}", render_path(binding.source()));
+            for (provider, context) in binding.provider_contexts() {
+                println!("login context ({provider}): {context}");
+            }
         }
     }
     println!(
@@ -1333,6 +1348,7 @@ fn terminate_with_signal(signal_number: i32) -> i32 {
 enum ContextSelection {
     Explicit(String),
     ProjectBound,
+    ProjectProvider(ProviderSelection),
 }
 
 enum CliCommand {
@@ -1373,6 +1389,17 @@ enum ProviderSelection {
     Github,
 }
 
+impl ProviderSelection {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Aws => "aws",
+            Self::Ssh => "ssh",
+            Self::Gcp => "gcp",
+            Self::Github => "github",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LoginMode {
     Execute,
@@ -1392,7 +1419,7 @@ struct ResolvedSelection {
 
 enum SelectionSource {
     CommandLine,
-    ProjectBinding(PathBuf),
+    ProjectBinding(ProjectBinding),
 }
 
 struct CliExecutionContextResolver {
@@ -1431,6 +1458,10 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
                 mode,
             })
         }
+        Some("aws") => parse_login_shortcut(&arguments, ProviderSelection::Aws),
+        Some("gh") => parse_login_shortcut(&arguments, ProviderSelection::Github),
+        Some("gcloud") => parse_login_shortcut(&arguments, ProviderSelection::Gcp),
+        Some("empireai") => parse_login_shortcut(&arguments, ProviderSelection::Ssh),
         Some("doctor") => {
             parse_doctor(&arguments).map(|(selection, provider, format)| CliCommand::Doctor {
                 selection,
@@ -1438,8 +1469,50 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
                 format,
             })
         }
-        _ => Err("usage: authmux <exec|context|doctor|login|status> ...".to_owned()),
+        _ => Err(
+            "usage: authmux <exec|context|doctor|login|status|aws|gh|gcloud|empireai> ..."
+                .to_owned(),
+        ),
     }
+}
+
+fn parse_login_shortcut(
+    arguments: &[OsString],
+    provider: ProviderSelection,
+) -> Result<CliCommand, String> {
+    const USAGE: &str =
+        "usage: authmux <aws|gh|gcloud|empireai> [--context <context>] [--print-command]";
+    let mut context = None;
+    let mut mode = LoginMode::Execute;
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments[index].to_str() {
+            Some("--context") if context.is_none() => {
+                context = Some(
+                    arguments
+                        .get(index + 1)
+                        .and_then(|argument| argument.to_str())
+                        .filter(|name| !name.is_empty() && !name.starts_with('-'))
+                        .ok_or_else(|| USAGE.to_owned())?
+                        .to_owned(),
+                );
+                index += 2;
+            }
+            Some("--print-command") if mode == LoginMode::Execute => {
+                mode = LoginMode::PrintCommand;
+                index += 1;
+            }
+            _ => return Err(USAGE.to_owned()),
+        }
+    }
+    Ok(CliCommand::Login {
+        selection: context.map_or(
+            ContextSelection::ProjectProvider(provider),
+            ContextSelection::Explicit,
+        ),
+        provider: Some(provider),
+        mode,
+    })
 }
 
 fn parse_login(
@@ -1685,15 +1758,23 @@ fn resolve_selection(selection: ContextSelection) -> Result<ResolvedSelection, S
             context_name,
             source: SelectionSource::CommandLine,
         }),
-        ContextSelection::ProjectBound => {
+        ContextSelection::ProjectBound | ContextSelection::ProjectProvider(_) => {
             let working_directory = env::current_dir().map_err(|error| {
                 format!("could not resolve working directory ({:?})", error.kind())
             })?;
             let binding = ProjectBinding::discover(&working_directory)
                 .map_err(|failure| failure.to_string())?;
+            let context_name = match selection {
+                ContextSelection::ProjectProvider(provider) => binding
+                    .provider_contexts()
+                    .get(provider.name())
+                    .map_or(binding.context_name(), String::as_str),
+                _ => binding.context_name(),
+            }
+            .to_owned();
             Ok(ResolvedSelection {
-                context_name: binding.context_name().to_owned(),
-                source: SelectionSource::ProjectBinding(binding.source().to_path_buf()),
+                context_name,
+                source: SelectionSource::ProjectBinding(binding),
             })
         }
     }

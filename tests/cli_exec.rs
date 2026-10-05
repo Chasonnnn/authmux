@@ -265,7 +265,7 @@ fn exec_preserves_hostile_arguments_as_literal_values() {
             "--leading-dash",
         ])
         .arg(&shell_like)
-        .args(["semi;colon", "*"])
+        .args(["semi;colon", "*", "--help", "--version"])
         .env("XDG_CONFIG_HOME", fixture.path.join("config"))
         .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
         .output()
@@ -276,7 +276,9 @@ fn exec_preserves_hostile_arguments_as_literal_values() {
     assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
     assert_eq!(
         stdout,
-        format!("<space value>\n<雪>\n<--leading-dash>\n<{shell_like}>\n<semi;colon>\n<*>\n")
+        format!(
+            "<space value>\n<雪>\n<--leading-dash>\n<{shell_like}>\n<semi;colon>\n<*>\n<--help>\n<--version>\n"
+        )
     );
     assert!(
         !marker.exists(),

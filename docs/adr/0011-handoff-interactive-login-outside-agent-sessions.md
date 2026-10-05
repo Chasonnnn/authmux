@@ -31,6 +31,15 @@ are intentionally omitted from the sanitized native-command preview. The agent
 does not request login output, browser URLs, authorization codes, passwords, or
 MFA values.
 
+The handoff names a separate terminal application, such as Terminal, iTerm,
+or Ghostty. Codex or Claude chat shell commands remain captured even when the
+user starts them. They are not an external-terminal handoff.
+
+Native login success leaves the original operation pending. After user
+confirmation, the agent retries its preserved argument vector once and reports
+the substantive result. Recovery is complete only if that guarded operation
+succeeds. Authmux does not launch a terminal or automatically resume the agent.
+
 For normal bound-project work, agents invoke the leaf operation through
 `authmux exec` directly. They use `context show` once when project intent is
 unfamiliar or changed, and reserve `status` and `doctor` for overview or

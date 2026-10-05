@@ -91,11 +91,13 @@ Native success does not by itself claim live Session Usability.
 `--print-command` performs the same bounded planning and sanitized preview but
 does not start the native login. Use it from Codex, Claude, CI, or another
 captured agent session, then rerun the same authmux command without
-`--print-command` in a separate user-controlled terminal. This preserves
+`--print-command` in a separate terminal app, such as Terminal, iTerm, or Ghostty.
+Do not use a Codex or Claude chat shell command; its output remains captured. This preserves
 process-scoped provider selectors while keeping browser URLs, device codes,
 MFA prompts, and native login output out of the agent transcript. After the
 user confirms completion, retry the original guarded command; do not add a
-routine `status` round trip.
+routine `status` round trip. Recovery is complete only when the original guarded
+operation succeeds. Native login success leaves that operation pending.
 
 GitHub uses a user-owned native configuration directory and the system
 credential store:
@@ -118,7 +120,11 @@ Status contacts GitHub through `gh auth status` without requesting or printing
 a token. Guarded execution validates the active login, then applies
 `GH_CONFIG_DIR` and `GH_HOST` only to the child. Ambient GitHub token variables
 are removed. Authmux rejects GitHub CLI plaintext-token fallback; configure a
-supported system credential store instead. GitHub execution accepts only `gh`;
+supported system credential store instead. An unverified storage source can also
+reflect restricted credential-store access. When that restriction is known,
+request scoped access for the exact guarded command and retry once. Stop if
+the retry fails. This diagnostic alone does not justify another login.
+GitHub execution accepts only `gh`;
 raw `git` authentication is not selected by `GH_CONFIG_DIR` and fails closed.
 
 For GitHub work inside a repository bound to AWS or GCP, select a configured
@@ -168,7 +174,8 @@ The event follows the checked-in
 [`exec-event-v1` schema](docs/schemas/exec-event-v1.schema.json). Codex and
 Claude preserve the original command, run only the non-executing login preview,
 pause for the user's external-terminal login, and retry the exact command once.
-They stop on a repeated or malformed event.
+They stop on a repeated or malformed event. Unclassified exit-5 provider
+failures do not establish that login is required.
 
 Continuity remains provider-specific:
 
@@ -398,6 +405,30 @@ fields. No changes to user-owned provider definitions are required.
 `.authmux.toml` is ignored by this repository's default because project and
 organization names can be sensitive. A project that intentionally shares the
 binding must make that decision explicitly.
+
+## Command help
+
+`authmux --help` and `<command> --help` print syntax and supported options.
+`-h` is also accepted. `authmux --version` or `-V` prints the package version.
+These requests exit zero without loading configuration or contacting providers.
+Arguments after `exec --` belong to the child, including help and version flags.
+
+## Agent skill synchronization
+
+`integrations/skills/authmux/SKILL.md` is the authoritative authmux skill.
+Update it alongside CLI behavior. Preserve installed runtime metadata and
+other skills when publishing its content.
+
+Publish and verify installed copies before local delivery or release:
+
+```sh
+sh scripts/sync-authmux-skill.sh --write ~/.codex/skills/authmux ~/.claude/skills/authmux
+sh scripts/sync-authmux-skill.sh --check ~/.codex/skills/authmux ~/.claude/skills/authmux
+```
+
+The check exits nonzero for a missing or different copy. Review any installed
+edits before publishing. Explicit destinations support copied or symlinked
+skill directories without changing how the agent runtime discovers them.
 
 ## Current state
 

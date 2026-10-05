@@ -49,6 +49,10 @@ child-owned: authmux does not capture arbitrary child output or add a
 resource-specific probe merely to classify Reauthentication. SSH retains its
 explicit reusable-transport contract.
 
+An unclassified exit-5 provider failure is not evidence of expiry. Agents do
+not recommend login from that failure alone. A successful native login leaves
+the original operation pending until its single guarded retry succeeds.
+
 Work expected to outlive a human Session uses repository-approved OIDC or
 workload identity for deployment and sanitized log retrieval. Authmux may guard
 the command that triggers or observes that workflow, but it does not create

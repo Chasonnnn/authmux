@@ -16,6 +16,9 @@ the operating system retain credential custody.
    Otherwise do not repeat it.
 3. For `gh`, select the GitHub context under **GitHub CLI** below. For other
    providers, run the requested leaf operation through `authmux exec -- ...`.
+   If the repo declares a separate login context for that provider, select it
+   explicitly with `--context CONTEXT` for the operation; mappings do not
+   automatically route `exec`, `status`, or `doctor`.
    Guarded execution resolves the binding, validates the provider evidence it
    requires, filters ambient credentials, and fails closed.
    Preserve the exact argv until the operation finishes or its single
@@ -33,9 +36,52 @@ authmux exec -- gcloud projects describe PROJECT_ID
 authmux exec --context GITHUB_CONTEXT -- gh pr list
 ```
 
-Use `--context CONTEXT` outside a bound repository when repository instructions
-or the user identify that context. GitHub CLI also permits the provider-specific
-selection below inside a cloud-bound repository.
+Use `--context CONTEXT` when the repository mapping, repository instructions,
+or user identifies that context, or for GitHub selection below. Never guess a
+context from a shortcut name.
+
+## Repo login shortcuts
+
+For explicit login requests, use the configured repo's shortcut:
+
+| Command | Provider | Repo mapping |
+|---|---|---|
+| `authmux aws` | AWS | `project.providers.aws` |
+| `authmux gh` | GitHub | `project.providers.github` |
+| `authmux gcloud` | GCP | `project.providers.gcp` |
+| `authmux empireai` | SSH | `project.providers.ssh` |
+
+Each accepts `--context CONTEXT` and `--print-command`. Explicit context wins;
+otherwise the matching repo mapping wins, with `project.context` used only
+when that provider has no mapping. An invalid mapping or missing provider is
+an error, not permission to try another context. `empireai` uses the configured
+SSH host alias; it does not select a hardcoded cluster.
+
+Repo configuration keeps the default context and references existing user
+contexts, for example:
+
+```toml
+version = 1
+[project]
+context = "research"
+[project.providers]
+aws = "research"
+github = "github"
+ssh = "empire"
+```
+
+`authmux context show` lists these login mappings. Install a binary that
+supports shortcuts before adding the table; older versions reject it. Do not
+rewrite repo bindings merely to perform a login.
+
+In captured sessions, run only the shortcut with `--print-command`.
+Have the user open a separate terminal app, such as Terminal, iTerm, or Ghostty.
+They rerun the command without the flag from the same repository, outside
+Codex or Claude. Do not use a chat shell command.
+An explicit `--context` may select the resolved context instead.
+These shortcuts log in only; they never forward provider arguments.
+Guarded operations still use `exec`. Keep the exact event-provided login argv
+for recovery below.
 
 ## GitHub CLI
 
@@ -43,8 +89,11 @@ GitHub PRs, reviews, checks, Actions, and repository API calls require GitHub
 authentication. An AWS or GCP Project Binding does not make cloud login a
 prerequisite for these operations.
 
-- Use the bound context when it is GitHub-only.
-- Otherwise inspect `authmux context list --json` once. When exactly one
+- If `project.providers.github` is declared, use that GitHub-only context with
+  `--context` before the first operation. A missing or incompatible mapped
+  context stops the operation; do not fall back to discovery.
+- Otherwise use the default bound context when it is GitHub-only.
+- If neither applies, inspect `authmux context list --json` once. When exactly one
   GitHub-only context matches the target host and repository instructions do
   not require another GitHub identity, use it explicitly:
   `authmux exec --context GITHUB_CONTEXT -- gh ...`. Keep the repository
@@ -52,9 +101,20 @@ prerequisite for these operations.
 - If the required GitHub identity is unclear or no matching context exists,
   ask for the GitHub context. Do not change the cloud binding or substitute
   ambient authentication.
+- Select the GitHub context before the first `gh` run, never after a failure.
 - Never request AWS, GCP, or SSH login to unblock a `gh` operation. An older
-  authmux may emit an AWS Reauthentication event when `gh` uses an AWS context;
-  reject that mismatched event and select the GitHub context above.
+  authmux may emit an AWS Reauthentication event when `gh` ran under an AWS
+  context; reject that mismatched event and run the same `gh` argv once under
+  the GitHub context selected above. This is the only cross-context retry the
+  command boundaries below allow.
+
+If guarded execution reports unverified GitHub system credential storage,
+check whether the execution environment restricts credential-store access.
+When it does, request scoped access for the exact guarded command and retry
+once. Stop if that retry fails. Do not rerun unchanged restricted commands,
+request login from this diagnostic alone, or weaken secure-storage checks.
+A confirmed plaintext-storage diagnostic requires native secure-storage repair
+in a separate terminal app before another guarded attempt.
 
 Mixed-provider execution remains unsupported. Selecting an existing GitHub-only
 context keeps its Expected Identity and credential-store guard in force.
@@ -75,14 +135,19 @@ authmux login CONTEXT --provider PROVIDER --print-command
 ```
 
 Then report that the user should rerun the same `authmux login` without
-`--print-command` in a separate terminal, then stop that provider operation.
+`--print-command` in a separate terminal app (Terminal, iTerm, or Ghostty),
+outside Codex or Claude. Chat shell commands retain native output even when
+the user starts them. Stop that provider operation until the user confirms
+completion.
 Keeping authmux in the external path preserves provider selectors omitted from
 the sanitized native-command preview. Never ask the user to paste provider
 output, a browser URL, device or authorization code, password, token, or MFA
 value. After confirmation, retry the preserved original argv once without a
-status round trip. If it returns exit code `10` again, stop and report the
-repeated Reauthentication requirement; never start a second login or switch
-identity.
+status round trip. Report the original operation's substantive result.
+Native login success leaves the operation pending. Recovery is complete only
+when its guarded retry succeeds. If it returns exit code `10` again, report
+the repeated Reauthentication requirement and stop. Never start a second login
+or switch identity.
 
 GCP child failures do not produce this event because authmux cannot safely
 classify arbitrary child output. Do not infer Reauthentication from a generic
@@ -91,6 +156,8 @@ nonzero child exit or retry it automatically.
 If AWS identity observation reports that it could not reach the provider, do
 not start login. Request network access for the preserved guarded command and
 retry it once. Stop if the network-enabled retry fails; do not bypass authmux.
+An unclassified exit-5 provider failure does not establish expiry or missing
+credentials. Do not recommend login from that failure alone.
 
 ## Native Git
 
@@ -110,21 +177,25 @@ selector contract and does not manage Git authentication.
   inactive required SSH transport with a bare provider command or ambient
   selector.
 - Preserve child exit codes and do not retry through another context or
-  identity.
+  identity, except the single `gh` retry under **GitHub CLI**.
 
 ## Provider boundaries
 
 - AWS, Google Cloud, and GitHub use guarded `authmux exec` paths. GitHub accepts
   `gh`, not raw Git authentication.
 - SSH has no generic `exec` path. Before automated SSH work, require
-  `authmux status --context CONTEXT --provider ssh --require-active-transport`;
-  after it passes, use the repository's native SSH host alias. If it fails for
+  `authmux status --context CONTEXT --provider ssh --require-active-transport`,
+  selecting the repo's `project.providers.ssh` context when declared; after it
+  passes, use that context's native SSH host alias. If it fails for
   inactivity, use the external-terminal login handoff above.
 - For unattended deployment or log monitoring that may exceed a human Session,
   use the repository's approved OIDC or workload-identity workflow. Do not keep
   a user Session alive with a timer, create static cloud keys, or launch the
   whole coding agent inside authmux.
 
-Report only the resolved Authentication Context and provider, the required
-identity or transport evidence, the guarded command category and outcome, and
-the sanitized Reauthentication command when blocked.
+For authentication reporting, include only the resolved Authentication Context
+and provider, the required identity or transport evidence, the guarded command
+category and outcome, and the sanitized Reauthentication command when blocked.
+
+Also report the requested operation's substantive result; the authentication
+summary does not replace it.

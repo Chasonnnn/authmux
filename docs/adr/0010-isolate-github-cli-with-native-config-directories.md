@@ -45,6 +45,24 @@ Identity equality, and `keyring` storage. Plaintext native storage, malformed
 or truncated output, ambiguity, and provider failure fail closed with a
 sanitized diagnostic.
 
+Secure-storage diagnostics distinguish evidence from access restrictions.
+GitHub CLI 2.96.0 can retain a configuration-file source label after a failed
+keyring lookup. A source label alone therefore does not prove plaintext storage.
+Only a successful observation naming the selected configuration's `hosts.yml`
+is reported as plaintext storage. Other non-keyring sources remain unverified.
+Neither diagnostic includes the source label or configuration path.
+Both cases block execution. A native probe failure alone does not recommend login.
+
+Primary source contracts:
+
+- [GitHub CLI 2.96.0 active-token selection](https://github.com/cli/cli/blob/v2.96.0/internal/config/config.go#L219-L241)
+- [GitHub CLI 2.96.0 status source labels](https://github.com/cli/cli/blob/v2.96.0/pkg/cmd/auth/status/status.go#L337-L343)
+
+When execution permissions restrict credential-store access, agents request
+scoped access for the preserved guarded command and retry it once. An unchanged
+failure stops the operation. This does not relax secure storage, change identity,
+inspect credential files, or authorize a bare-provider fallback.
+
 `authmux login NAME --provider github` delegates to:
 
 ```console

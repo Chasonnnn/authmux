@@ -277,7 +277,7 @@ where
         }
         if output.exit_code() != 0 {
             return Err(ProviderFailure::sanitized(
-                "GitHub status failed; run `authmux login` for this context",
+                "GitHub status observation failed without evidence that Reauthentication is required; check network and credential-store access",
             ));
         }
 
@@ -300,8 +300,18 @@ where
             ));
         };
         if account.token_source != "keyring" {
+            // A failed keyring lookup can retain the config source label even
+            // when no credential was read. Only successful validation with the
+            // exact selected hosts.yml source establishes plaintext storage.
+            if account.state == "success"
+                && Path::new(&account.token_source) == profile.config_dir().join("hosts.yml")
+            {
+                return Err(ProviderFailure::sanitized(
+                    "GitHub CLI reports plaintext credential storage; configure the system credential store in an external terminal before retrying",
+                ));
+            }
             return Err(ProviderFailure::sanitized(
-                "GitHub credential is not stored in the system credential store",
+                "GitHub system credential storage could not be verified; check credential-store access and native storage configuration",
             ));
         }
         let identity = ObservedIdentity::provider_identity(account.login.clone())?;

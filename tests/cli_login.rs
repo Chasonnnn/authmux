@@ -61,7 +61,10 @@ fn ssh_login_can_print_an_external_terminal_handoff_without_starting_native_logi
          host alias: empire-alpha\n\
          expected remote principal: researcher@example.invalid\n\
          native command: ssh empire-alpha\n\
-         handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+         handoff: open a separate terminal app (Terminal, iTerm, or Ghostty), outside Codex or Claude.\n\
+         Rerun this authmux command without --print-command there; do not use a chat shell command.\n\
+         After login, confirm completion in the chat; the agent must retry the original guarded command once.\n\
+         Recovery is complete only when that command succeeds. Authmux did not start the native command.\n"
     );
     assert!(stderr.is_empty());
     assert!(
@@ -173,7 +176,10 @@ fn gcp_login_can_print_an_external_terminal_handoff_without_starting_native_logi
          native command: gcloud auth login researcher@example.invalid --brief --force\n"
     ));
     assert!(stdout.ends_with(
-        "handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+        "handoff: open a separate terminal app (Terminal, iTerm, or Ghostty), outside Codex or Claude.\n\
+         Rerun this authmux command without --print-command there; do not use a chat shell command.\n\
+         After login, confirm completion in the chat; the agent must retry the original guarded command once.\n\
+         Recovery is complete only when that command succeeds. Authmux did not start the native command.\n"
     ));
     assert!(stderr.is_empty());
     assert!(
@@ -249,7 +255,10 @@ fn aws_login_can_print_an_external_terminal_handoff_without_starting_native_logi
          reauthentication mode: console_login\n\
          native login profile: cornell-development\n\
          native command: aws login --profile cornell-development --no-cli-auto-prompt\n\
-         handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+         handoff: open a separate terminal app (Terminal, iTerm, or Ghostty), outside Codex or Claude.\n\
+         Rerun this authmux command without --print-command there; do not use a chat shell command.\n\
+         After login, confirm completion in the chat; the agent must retry the original guarded command once.\n\
+         Recovery is complete only when that command succeeds. Authmux did not start the native command.\n"
     );
     assert!(stderr.is_empty());
     assert!(
@@ -551,7 +560,7 @@ fn login_shortcuts_select_mapped_contexts_from_nested_directories() {
             output.stderr
         );
         assert!(stdout.starts_with(&format!("login: {context}\nprovider: {provider}\n")));
-        assert!(stdout.contains("authmux did not start the native command"));
+        assert!(stdout.contains("Authmux did not start the native command"));
         for marker in ["aws-login-ran", "gcloud-ran", "ssh-ran"] {
             assert!(!fixture.path.join(marker).exists());
         }

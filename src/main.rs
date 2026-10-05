@@ -6,6 +6,8 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::process;
 
+mod cli_help;
+
 #[cfg(unix)]
 use nix::sys::signal::{Signal, kill};
 #[cfg(unix)]
@@ -28,6 +30,10 @@ fn main() {
 
 fn run() -> i32 {
     match parse_command(env::args_os().skip(1).collect()) {
+        Ok(CliCommand::Information(text)) => {
+            println!("{text}");
+            0
+        }
         Ok(CliCommand::Exec { selection, command }) => execute(selection, &command),
         Ok(CliCommand::ContextShow { selection }) => show_context(selection),
         Ok(CliCommand::ContextList { format }) => show_context_list(format),
@@ -468,7 +474,10 @@ fn print_external_terminal_handoff(mode: LoginMode) -> bool {
         return false;
     }
     println!(
-        "handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command"
+        "handoff: open a separate terminal app (Terminal, iTerm, or Ghostty), outside Codex or Claude.\n\
+         Rerun this authmux command without --print-command there; do not use a chat shell command.\n\
+         After login, confirm completion in the chat; the agent must retry the original guarded command once.\n\
+         Recovery is complete only when that command succeeds. Authmux did not start the native command."
     );
     true
 }
@@ -1352,6 +1361,7 @@ enum ContextSelection {
 }
 
 enum CliCommand {
+    Information(String),
     Exec {
         selection: ContextSelection,
         command: CommandSpec,
@@ -1438,6 +1448,15 @@ impl ExecutionContextResolver for CliExecutionContextResolver {
 }
 
 fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
+    if arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--version" | "-V")) {
+        return Ok(CliCommand::Information(format!(
+            "authmux {}",
+            env!("CARGO_PKG_VERSION")
+        )));
+    }
+    if let Some(text) = cli_help::render(&arguments) {
+        return Ok(CliCommand::Information(text));
+    }
     match arguments.first().and_then(|argument| argument.to_str()) {
         Some("exec") => parse_exec(arguments)
             .map(|(selection, command)| CliCommand::Exec { selection, command }),
@@ -1469,10 +1488,7 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
                 format,
             })
         }
-        _ => Err(
-            "usage: authmux <exec|context|doctor|login|status|aws|gh|gcloud|empireai> ..."
-                .to_owned(),
-        ),
+        _ => Err(cli_help::TOP_USAGE.to_owned()),
     }
 }
 
@@ -1480,8 +1496,7 @@ fn parse_login_shortcut(
     arguments: &[OsString],
     provider: ProviderSelection,
 ) -> Result<CliCommand, String> {
-    const USAGE: &str =
-        "usage: authmux <aws|gh|gcloud|empireai> [--context <context>] [--print-command]";
+    const USAGE: &str = cli_help::SHORTCUT_USAGE;
     let mut context = None;
     let mut mode = LoginMode::Execute;
     let mut index = 1;
@@ -1518,8 +1533,7 @@ fn parse_login_shortcut(
 fn parse_login(
     arguments: &[OsString],
 ) -> Result<(ContextSelection, Option<ProviderSelection>, LoginMode), String> {
-    const USAGE: &str =
-        "usage: authmux login <context> [--provider <aws|gcp|github|ssh>] [--print-command]";
+    const USAGE: &str = cli_help::LOGIN_USAGE;
     let context_name = arguments
         .get(1)
         .and_then(|argument| argument.to_str())
@@ -1564,12 +1578,12 @@ fn parse_context_command(arguments: &[OsString]) -> Result<CliCommand, String> {
         Some("list") => {
             parse_context_list(arguments).map(|format| CliCommand::ContextList { format })
         }
-        _ => Err("usage: authmux context <list|show> ...".to_owned()),
+        _ => Err(cli_help::CONTEXT_USAGE.to_owned()),
     }
 }
 
 fn parse_exec(arguments: Vec<OsString>) -> Result<(ContextSelection, CommandSpec), String> {
-    const USAGE: &str = "usage: authmux exec [--context <context>] -- <program> [args...]";
+    const USAGE: &str = cli_help::EXEC_USAGE;
     if arguments.first().and_then(|arg| arg.to_str()) != Some("exec") {
         return Err(USAGE.to_owned());
     }
@@ -1602,7 +1616,7 @@ fn parse_exec(arguments: Vec<OsString>) -> Result<(ContextSelection, CommandSpec
 }
 
 fn parse_context_show(arguments: &[OsString]) -> Result<ContextSelection, String> {
-    const USAGE: &str = "usage: authmux context show [--context <context>]";
+    const USAGE: &str = cli_help::CONTEXT_SHOW_USAGE;
     if arguments.get(1).and_then(|argument| argument.to_str()) != Some("show") {
         return Err(USAGE.to_owned());
     }
@@ -1622,7 +1636,7 @@ fn parse_context_show(arguments: &[OsString]) -> Result<ContextSelection, String
 }
 
 fn parse_context_list(arguments: &[OsString]) -> Result<ReportFormat, String> {
-    const USAGE: &str = "usage: authmux context list [--json]";
+    const USAGE: &str = cli_help::CONTEXT_LIST_USAGE;
     match arguments.len() {
         2 => Ok(ReportFormat::Human),
         3 if arguments.get(2).and_then(|argument| argument.to_str()) == Some("--json") => {
@@ -1644,7 +1658,7 @@ fn parse_status(
     ),
     String,
 > {
-    const USAGE: &str = "usage: authmux status [--all | --context <context>] [--provider <aws|gcp|github|ssh>] [--json] [--require-active-transport]";
+    const USAGE: &str = cli_help::STATUS_USAGE;
     let mut selection = None;
     let mut all = false;
     let mut provider = None;
@@ -1707,8 +1721,7 @@ fn parse_status(
 fn parse_doctor(
     arguments: &[OsString],
 ) -> Result<(ContextSelection, Option<ProviderSelection>, ReportFormat), String> {
-    const USAGE: &str =
-        "usage: authmux doctor [--context <context>] [--provider <aws|gcp|github|ssh>] [--json]";
+    const USAGE: &str = cli_help::DOCTOR_USAGE;
     let mut selection = None;
     let mut provider = None;
     let mut format = ReportFormat::Human;

@@ -192,7 +192,10 @@ github = "github"
          GitHub hostname: github.com\n\
          expected GitHub login: fictional-researcher\n\
          native command: gh auth login --hostname github.com --web --skip-ssh-key\n\
-         handoff: rerun this authmux login in an external terminal without --print-command; authmux did not start the native command\n"
+         handoff: open a separate terminal app (Terminal, iTerm, or Ghostty), outside Codex or Claude.\n\
+         Rerun this authmux command without --print-command there; do not use a chat shell command.\n\
+         After login, confirm completion in the chat; the agent must retry the original guarded command once.\n\
+         Recovery is complete only when that command succeeds. Authmux did not start the native command.\n"
         );
         assert!(stderr.is_empty());
         assert!(
@@ -337,24 +340,69 @@ fn context_inspection_shows_github_intent_without_exposing_the_config_path() {
 }
 
 #[test]
-fn github_status_rejects_plaintext_native_credential_storage() {
-    let fixture = GithubCliFixture::new("plaintext-storage");
-    let bin_directory = fixture.configure_gh("success", "fictional-researcher", "oauth_token", 0);
+fn github_exec_distinguishes_plaintext_from_unverified_storage_without_running_the_child() {
+    let fixture = GithubCliFixture::new("storage-evidence");
+    let plaintext_source = fixture.github_config_dir().join("hosts.yml");
+    let plaintext_source = plaintext_source.to_str().unwrap();
+    for (state, source, message) in [
+        (
+            "success",
+            plaintext_source,
+            "GitHub CLI reports plaintext credential storage; configure the system credential store in an external terminal before retrying",
+        ),
+        (
+            "error",
+            plaintext_source,
+            "GitHub system credential storage could not be verified; check credential-store access and native storage configuration",
+        ),
+        (
+            "error",
+            "",
+            "GitHub system credential storage could not be verified; check credential-store access and native storage configuration",
+        ),
+        (
+            "success",
+            "ghp_fictional_sensitive_source",
+            "GitHub system credential storage could not be verified; check credential-store access and native storage configuration",
+        ),
+    ] {
+        let bin_directory = fixture.configure_gh(state, "fictional-researcher", source, 0);
+        let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+            .args(["exec", "--context", "github", "--", "gh", "repo", "view"])
+            .env("HOME", fixture.home())
+            .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(5));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!("refusing child execution: {message}\n")
+        );
+        assert!(!fixture.path.join("child-ran").exists());
+    }
+}
 
+#[test]
+fn github_probe_failure_does_not_request_login_or_expose_provider_output() {
+    let fixture = GithubCliFixture::new("probe-failure");
+    let bin_directory =
+        fixture.configure_gh("error", "ghp_fictional_sensitive_login", "keyring", 1);
     let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
-        .args(["status", "--context", "github"])
+        .args(["exec", "--context", "github", "--", "gh", "repo", "view"])
         .env("HOME", fixture.home())
         .env("XDG_CONFIG_HOME", fixture.authmux_config_root())
         .env("PATH", format!("{}:/usr/bin:/bin", bin_directory.display()))
         .output()
-        .expect("authmux runs");
-
+        .unwrap();
     assert_eq!(output.status.code(), Some(5));
     assert!(output.stdout.is_empty());
     assert_eq!(
-        String::from_utf8(output.stderr).expect("stderr is UTF-8"),
-        "provider status failed: GitHub credential is not stored in the system credential store\n"
+        String::from_utf8(output.stderr).unwrap(),
+        "refusing child execution: GitHub status observation failed without evidence that Reauthentication is required; check network and credential-store access\n"
     );
+    assert!(!fixture.path.join("child-ran").exists());
 }
 
 #[test]
@@ -469,7 +517,7 @@ fn status_all_keeps_the_configured_context_count_when_a_provider_fails() {
     );
     assert_eq!(
         String::from_utf8(output.stderr).expect("stderr is UTF-8"),
-        "provider status failed: GitHub credential is not stored in the system credential store\n"
+        "provider status failed: GitHub system credential storage could not be verified; check credential-store access and native storage configuration\n"
     );
 }
 
@@ -573,6 +621,7 @@ impl GithubCliFixture {
             &executable,
             format!(
                 "#!/bin/sh\n\
+                 if [ \"$1 $2\" != \"auth status\" ]; then /usr/bin/touch '{}'; exit 98; fi\n\
                  printf 'argv=' > '{}'\n\
                  first=1\n\
                  for arg in \"$@\"; do\n\
@@ -584,6 +633,7 @@ impl GithubCliFixture {
                  printf 'GH_TOKEN=%s\\n' \"${{GH_TOKEN:-absent}}\" >> '{}'\n\
                  printf '%s\\n' '{{\"hosts\":{{\"github.com\":[{{\"state\":\"{state}\",\"active\":true,\"host\":\"github.com\",\"login\":\"{login}\",\"tokenSource\":\"{token_source}\",\"scopes\":\"repo\",\"gitProtocol\":\"ssh\"}}]}}}}'\n\
                  exit {exit_code}\n",
+                self.path.join("child-ran").display(),
                 self.invocation().display(),
                 self.invocation().display(),
                 self.invocation().display(),

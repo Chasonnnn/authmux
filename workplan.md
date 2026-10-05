@@ -499,6 +499,32 @@ Exit criteria:
 - The post-login report distinguishes native command success from validated
   session usability.
 
+### Usage-review improvements — October 4, 2026
+
+Acceptance criteria:
+
+- Help and version requests exit zero without configuration or provider contact.
+- Child help/version arguments after the exec delimiter remain unchanged.
+- GitHub storage diagnostics distinguish verified plaintext from unverified
+  storage. Both block execution without exposing provider output or paths.
+- A native probe failure alone does not recommend login. Agent guidance permits
+  one scoped credential-store permissions retry when that restriction is known.
+- Login previews name an external terminal app and exclude captured chat shell
+  commands. Recovery remains pending until the original guarded retry succeeds.
+- The repository skill is authoritative. A synchronization command publishes
+  its content and rejects missing or divergent installed copies during checks.
+
+Local validation completed:
+
+- Regression tests failed on the original help, storage diagnostic, and
+  login-handoff behavior, then passed after the changes.
+- `mise install`, formatting, strict Clippy, all-feature tests, and locked
+  debug/release builds passed. Eight opt-in live tests remained ignored.
+- Skill synchronization passed missing, matching, divergent, and write checks
+  with symlinked directories, spaces in paths, and retained runtime metadata.
+- The installed binary matches the release build. Installed Codex and Claude
+  skills match the authoritative copy. Installed help and version probes pass.
+
 ### Phase 4 — hardening and live workflow release gate
 
 Deliverables:

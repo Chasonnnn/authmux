@@ -650,7 +650,7 @@ fn shortcut_invalid_mapping_never_falls_back_to_default_context() {
     fixture.write_binding("version = 1\n[project]\ncontext = \"mixed\"\n");
     let output = fixture
         .command(&bin_directory)
-        .args(["gh"])
+        .args(["gcloud"])
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));

@@ -44,7 +44,7 @@ AWS recognizes a bounded set of expired and missing-session signatures from
 the capped STS preflight. Unknown, malformed, unreachable, or sensitive output
 remains a sanitized provider failure. A bounded AWS endpoint-connection
 signature requests network access and retry without suggesting
-Reauthentication. GitHub uses its typed unusable-Session result. GCP remains
+Reauthentication. GCP remains
 child-owned: authmux does not capture arbitrary child output or add a
 resource-specific probe merely to classify Reauthentication. SSH retains its
 explicit reusable-transport contract.
@@ -68,3 +68,5 @@ Exit code `10` and `exec-event-v1` become compatibility contracts. Provider
 classification stays intentionally incomplete; false generic failures are
 safer than false Reauthentication claims. Fully unattended continuity requires
 workload identity and cannot be promised for a human Session.
+
+ADR 0014 removes GitHub observations and events. AWS retains this event contract.

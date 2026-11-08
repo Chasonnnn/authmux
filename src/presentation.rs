@@ -11,7 +11,7 @@ use crate::{
 #[cfg(unix)]
 use crate::{
     GcpCredentialPlane, GcpPlaneObservation, GcpProjectMatch, GcpProviderDefinition,
-    GithubProviderDefinition, SshProviderDefinition, SshTransportObservation, SshTransportReuse,
+    SshProviderDefinition, SshTransportObservation, SshTransportReuse,
 };
 
 const STATUS_SCHEMA_VERSION: u32 = 3;
@@ -60,11 +60,6 @@ impl ReauthenticationEvent {
     #[must_use]
     pub fn aws(context: impl Into<String>) -> Self {
         Self::new(context, "aws")
-    }
-
-    #[must_use]
-    pub fn github(context: impl Into<String>) -> Self {
-        Self::new(context, "github")
     }
 
     fn new(context: impl Into<String>, provider: &'static str) -> Self {
@@ -302,50 +297,6 @@ impl StatusReport {
         Ok(Self {
             context: context_name.to_owned(),
             observations,
-        })
-    }
-
-    /// Builds a presentation-safe report from GitHub CLI provider validation.
-    ///
-    /// # Errors
-    ///
-    /// Returns a sanitized failure if the observation time cannot be represented.
-    #[cfg(unix)]
-    pub fn github(
-        context_name: &str,
-        profile: &GithubProviderDefinition,
-        observation: &StatusObservation,
-    ) -> Result<Self, PresentationFailure> {
-        let observed_at_unix = observation
-            .observed_at()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| PresentationFailure::new("status observation time is invalid"))?
-            .as_secs();
-        Ok(Self {
-            context: context_name.to_owned(),
-            observations: vec![StatusEntry {
-                provider: "github",
-                credential_plane: None,
-                profile: profile.hostname().to_owned(),
-                expected_identity: profile.expected_login().to_owned(),
-                observed_identity: observation
-                    .observed_identity()
-                    .map(|identity| identity.value().to_owned()),
-                identity_match: identity_match(observation.identity_match()),
-                expected_source_identity: None,
-                observed_source_identity: None,
-                source_identity_match: None,
-                expected_project: None,
-                observed_project: None,
-                project_match: None,
-                session_usability: session_usability(observation.usability()),
-                reason: observation_reason(observation.reason()),
-                reauthentication_need: reauthentication_need(observation.reauthentication_need()),
-                evidence_level: evidence_level(observation.evidence_level()),
-                provider_contacted: true,
-                transport_reuse: None,
-                observed_at_unix,
-            }],
         })
     }
 
@@ -613,14 +564,6 @@ impl ContextListReport {
                         });
                     }
                 }
-                if let Some(github) = definition.github() {
-                    providers.push(ProviderReference {
-                        provider: "github",
-                        credential_plane: None,
-                        profile: github.hostname().to_owned(),
-                        expected_identity: github.expected_login().to_owned(),
-                    });
-                }
                 ContextListEntry {
                     name: definition.name().to_owned(),
                     description: definition.description().map(str::to_owned),
@@ -682,16 +625,6 @@ impl ContextListReport {
                         writeln!(
                             report,
                             "  expected ADC identity: {}",
-                            provider.expected_identity
-                        )
-                        .expect("writing to a String cannot fail");
-                    }
-                    "github" => {
-                        writeln!(report, "  GitHub hostname: {}", provider.profile)
-                            .expect("writing to a String cannot fail");
-                        writeln!(
-                            report,
-                            "  expected GitHub login: {}",
                             provider.expected_identity
                         )
                         .expect("writing to a String cannot fail");

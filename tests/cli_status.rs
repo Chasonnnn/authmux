@@ -1,11 +1,96 @@
 #![cfg(unix)]
 
+use std::fmt::Write as _;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[test]
+fn status_all_observes_supported_contexts_without_a_project_binding() {
+    let fixture = FixtureDirectory::new("status-all");
+    let (bin_directory, sts_marker) = fixture.configure(Some("111111111111"));
+    fixture.add_ssh_context();
+
+    for json in [false, true] {
+        let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+            .args(if json {
+                vec!["status", "--all", "--json"]
+            } else {
+                vec!["status", "--all"]
+            })
+            .current_dir(&fixture.path)
+            .env_clear()
+            .env("HOME", &fixture.path)
+            .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+            .env("PATH", &bin_directory)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        if json {
+            let document: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(document["schema_version"], 1);
+            assert_eq!(document["command"], "status_all");
+            let contexts = document["contexts"].as_array().unwrap();
+            assert_eq!(contexts.len(), 2);
+            assert_eq!(contexts[0]["context"], "crm");
+            assert_eq!(contexts[0]["observations"][0]["provider"], "aws");
+            assert_eq!(contexts[0]["observations"][0]["identity_match"], "match");
+            assert_eq!(contexts[1]["context"], "empire");
+            assert_eq!(contexts[1]["observations"][0]["provider"], "ssh");
+            assert_eq!(contexts[1]["observations"][0]["provider_contacted"], false);
+        } else {
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(stdout.starts_with("authentication status: 2 contexts\n\n"));
+            assert!(stdout.contains("context: crm\nprovider: aws\n"));
+            assert!(stdout.contains("context: empire\nprovider: ssh\n"));
+        }
+    }
+    assert!(!sts_marker.exists());
+}
+
+#[test]
+fn status_all_preserves_successful_observations_when_another_provider_fails() {
+    let fixture = FixtureDirectory::new("status-all-partial-failure");
+    let (bin_directory, sts_marker) = fixture.configure(Some("111111111111"));
+    fixture.add_ssh_context();
+    fs::remove_file(bin_directory.join("aws")).unwrap();
+
+    for json in [false, true] {
+        let output = Command::new(env!("CARGO_BIN_EXE_authmux"))
+            .args(if json {
+                vec!["status", "--all", "--json"]
+            } else {
+                vec!["status", "--all"]
+            })
+            .current_dir(&fixture.path)
+            .env_clear()
+            .env("HOME", &fixture.path)
+            .env("XDG_CONFIG_HOME", fixture.path.join("config"))
+            .env("PATH", &bin_directory)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stderr.starts_with("provider status failed:"));
+        assert!(!stderr.contains(bin_directory.to_str().unwrap()));
+        if json {
+            let document: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+            let contexts = document["contexts"].as_array().unwrap();
+            assert_eq!(contexts.len(), 1);
+            assert_eq!(contexts[0]["context"], "empire");
+            assert_eq!(contexts[0]["observations"][0]["provider"], "ssh");
+        } else {
+            assert!(stdout.starts_with("authentication status: 2 contexts\n\n"));
+            assert!(stdout.contains("context: empire\nprovider: ssh\n"));
+        }
+    }
+    assert!(!sts_marker.exists());
+}
 
 #[test]
 fn status_reports_matching_local_metadata_without_calling_sts() {
@@ -589,6 +674,21 @@ impl FixtureDirectory {
 
     fn configure(&self, account: Option<&str>) -> (PathBuf, PathBuf) {
         self.configure_settings(account, None)
+    }
+
+    fn add_ssh_context(&self) {
+        let config_path = self.path.join("config/authmux/config.toml");
+        let mut config = fs::read_to_string(&config_path).unwrap();
+        writeln!(
+            config,
+            "\n[contexts.empire.providers.ssh]\n\
+             host_alias = \"empire-alpha\"\n\
+             expected_remote_principal = \"researcher@example.invalid\"\n\
+             control_path = \"{}\"",
+            self.path.join(".ssh/control").display()
+        )
+        .unwrap();
+        fs::write(config_path, config).unwrap();
     }
 
     fn configure_login_session(&self, login_session: &str) -> (PathBuf, PathBuf) {

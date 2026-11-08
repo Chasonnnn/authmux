@@ -6,15 +6,15 @@ status: accepted
 
 ## Decision
 
-`authmux aws`, `authmux gh`, `authmux gcloud`, and `authmux empireai` invoke the
-existing AWS, GitHub, GCP, and SSH login handlers. Each accepts only
+`authmux aws`, `authmux gcloud`, and `authmux empireai` invoke the
+existing AWS, GCP, and SSH login handlers. Each accepts only
 `--context NAME` and `--print-command`. They are explicit login operations and
 do not forward arbitrary provider commands.
 
 Version 1 project configuration retains the required `project.context` and
 adds an optional `project.providers` table. Keys are the canonical provider
-names `aws`, `github`, `gcp`, and `ssh`. Values name existing user-owned
-Authentication Contexts. A cloud project can reference shared GitHub and SSH
+names `aws`, `gcp`, and `ssh`. Values name existing user-owned
+Authentication Contexts. A cloud project can reference shared GCP and SSH
 contexts without repeating Provider Profiles or Expected Identities.
 
 Shortcut selection follows this precedence:
@@ -53,3 +53,5 @@ Existing version 1 files need no migration. Upgrade the binary before adding
 fallback, credential migration, global identity switch, or new provider is
 introduced. `empireai` uses a configured SSH host alias and does not imply a
 fixed Empire AI endpoint.
+
+ADR 0014 removes the former GitHub shortcut and project mapping.

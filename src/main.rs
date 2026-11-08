@@ -17,9 +17,8 @@ use authmux::{
     AllStatusReport, AwsAdapter, AwsDoctor, AwsLocalMetadataAdapter, AwsLoginPlan, AwsLoginPlanner,
     CommandSpec, ContextDefinition, ContextEngine, ContextListReport, DoctorOutcome, DoctorReport,
     ExecutionContextResolver, ExecutionFailure, ExecutionOutcome, ExecutionSelection, GcpDoctor,
-    GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, GithubDoctor,
-    GithubExecutionGuard, GithubLoginPlan, GithubStatus, ProcessRunner, ProjectBinding,
-    ReauthenticationEvent, ReauthenticationNeed, SecureProcessRunner, SshDoctor,
+    GcpExecutionFailure, GcpExecutionGuard, GcpLocalStatus, GcpLoginPlan, ProcessRunner,
+    ProjectBinding, ReauthenticationEvent, ReauthenticationNeed, SecureProcessRunner, SshDoctor,
     SshTransportObservation, SshTransportReuse, SshTransportStatus, StatusEngine, StatusReport,
     UserConfig,
 };
@@ -105,7 +104,6 @@ fn login(
         ProviderSelection::Aws => login_aws(selection, &definition, mode),
         ProviderSelection::Ssh => login_ssh(selection, &definition, mode),
         ProviderSelection::Gcp => login_gcp(selection, &definition, mode),
-        ProviderSelection::Github => login_github(selection, &definition, mode),
     }
 }
 
@@ -293,100 +291,6 @@ fn login_gcp(selection: &ContextSelection, definition: &ContextDefinition, mode:
     }
 }
 
-fn login_github(
-    selection: &ContextSelection,
-    definition: &ContextDefinition,
-    mode: LoginMode,
-) -> i32 {
-    let plan = match GithubLoginPlan::new(definition) {
-        Ok(plan) => plan,
-        Err(failure) => {
-            eprintln!("{failure}");
-            return failure.exit_code();
-        }
-    };
-    println!("login: {}", plan.context_name());
-    println!("provider: github");
-    println!("GitHub hostname: {}", plan.profile().hostname());
-    println!("expected GitHub login: {}", plan.profile().expected_login());
-    println!(
-        "native command: gh auth login --hostname {} --web --skip-ssh-key",
-        plan.profile().hostname()
-    );
-    if let Err(error) = std::io::stdout().flush() {
-        eprintln!("could not display GitHub login preview ({})", error.kind());
-        return 5;
-    }
-    if print_external_terminal_handoff(mode) {
-        return 0;
-    }
-
-    let Ok(current_definition) = resolve_login_again(selection, definition.name()) else {
-        return refuse_changed_context();
-    };
-    if let Err(failure) = plan.ensure_unchanged(&current_definition) {
-        eprintln!("{failure}");
-        return failure.exit_code();
-    }
-
-    let runner = match SecureProcessRunner::for_authmux() {
-        Ok(runner) => runner,
-        Err(failure) => {
-            eprintln!("{failure}");
-            return 2;
-        }
-    };
-    let outcome = match runner.run(plan.command(), &plan.selection()) {
-        Ok(outcome) => outcome,
-        Err(failure) => {
-            eprintln!("{failure}");
-            return exit_code(&failure);
-        }
-    };
-    if let Err(exit_code) = finish_native_login(outcome, "GitHub") {
-        return exit_code;
-    }
-    println!("result: native GitHub login command exited successfully");
-
-    let status_runner = match SecureProcessRunner::for_authmux() {
-        Ok(runner) => runner,
-        Err(failure) => {
-            eprintln!("{failure}");
-            return 2;
-        }
-    };
-    let observation = match GithubStatus::new(status_runner).observe(plan.profile()) {
-        Ok(observation) => observation,
-        Err(failure) => {
-            eprintln!("post-login GitHub validation failed: {failure}");
-            return 5;
-        }
-    };
-    let identity_match = match observation.identity_match() {
-        authmux::IdentityMatch::Match => "match",
-        authmux::IdentityMatch::Mismatch => "mismatch",
-        authmux::IdentityMatch::Unverified => "unverified",
-    };
-    let usability = match observation.usability() {
-        authmux::SessionUsability::Usable => "usable",
-        authmux::SessionUsability::Unusable => "unusable",
-        authmux::SessionUsability::Indeterminate => "indeterminate",
-    };
-    println!("post-login identity match: {identity_match}");
-    println!("post-login session usability: {usability}");
-    if observation.identity_match() != authmux::IdentityMatch::Match {
-        eprintln!(
-            "GitHub login completed but the active login does not match the Expected Identity"
-        );
-        return 4;
-    }
-    if observation.usability() != authmux::SessionUsability::Usable {
-        eprintln!("GitHub login completed but Session Usability was not established");
-        return 1;
-    }
-    0
-}
-
 fn login_ssh(selection: &ContextSelection, definition: &ContextDefinition, mode: LoginMode) -> i32 {
     let Some(profile) = definition.ssh() else {
         eprintln!("SSH Provider Profile is not configured");
@@ -483,6 +387,13 @@ fn print_external_terminal_handoff(mode: LoginMode) -> bool {
 }
 
 fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
+    if std::path::Path::new(command.program())
+        .file_name()
+        .is_some_and(|name| name == "gh")
+    {
+        eprintln!("GitHub CLI is not managed by authmux; run gh directly");
+        return 2;
+    }
     let resolved = match resolve_selection(selection.clone()) {
         Ok(selection) => selection,
         Err(message) => {
@@ -505,23 +416,10 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
         }
     };
 
-    if let Err(failure) = GithubExecutionGuard::validate_context(command, &definition) {
-        eprintln!("{failure}");
-        return failure.exit_code();
-    }
-
-    match (
-        definition.aws(),
-        definition.gcp(),
-        definition.github(),
-        definition.ssh(),
-    ) {
-        (Some(_), None, None, _) => execute_aws(selection, command),
-        (None, Some(profile), None, None) => execute_gcp(selection, &definition, profile, command),
-        (None, None, Some(profile), None) => {
-            execute_github(selection, &definition, profile, command)
-        }
-        (_, Some(_), _, _) | (_, _, Some(_), Some(_)) | (Some(_), _, Some(_), _) => {
+    match (definition.aws(), definition.gcp(), definition.ssh()) {
+        (Some(_), None, _) => execute_aws(selection, command),
+        (None, Some(profile), None) => execute_gcp(selection, &definition, profile, command),
+        (_, Some(_), _) => {
             let failure = GcpExecutionFailure::UnsupportedProviderComposition;
             eprintln!("{failure}");
             failure.exit_code()
@@ -531,80 +429,6 @@ fn execute(selection: ContextSelection, command: &CommandSpec) -> i32 {
                 "requested authentication context does not define AWS required by this command"
             );
             2
-        }
-    }
-}
-
-fn execute_github(
-    selection: ContextSelection,
-    definition: &ContextDefinition,
-    profile: &authmux::GithubProviderDefinition,
-    command: &CommandSpec,
-) -> i32 {
-    if let Err(failure) = GithubExecutionGuard::validate_command(command) {
-        eprintln!("{failure}");
-        return failure.exit_code();
-    }
-    let probe_runner = match SecureProcessRunner::for_authmux() {
-        Ok(runner) => runner,
-        Err(failure) => {
-            eprintln!("{failure}");
-            return 2;
-        }
-    };
-    let observation = match GithubStatus::new(probe_runner).observe(profile) {
-        Ok(observation) => observation,
-        Err(failure) => {
-            eprintln!("refusing child execution: {failure}");
-            return 5;
-        }
-    };
-    let execution_selection =
-        match GithubExecutionGuard::authorize(definition.name(), profile, &observation) {
-            Ok(selection) => selection,
-            Err(failure) => {
-                if failure.requires_reauthentication() {
-                    return emit_reauthentication_event(&ReauthenticationEvent::github(
-                        definition.name(),
-                    ));
-                }
-                eprintln!("{failure}");
-                return failure.exit_code();
-            }
-        };
-
-    let Ok(current_selection) = resolve_selection(selection) else {
-        return refuse_changed_context();
-    };
-    let Ok((current_config, _)) = load_user_config() else {
-        return refuse_changed_context();
-    };
-    let Ok(current_definition) =
-        current_config.resolve_context_definition(&current_selection.context_name)
-    else {
-        return refuse_changed_context();
-    };
-    if let Err(failure) = GithubExecutionGuard::ensure_unchanged(definition, &current_definition) {
-        eprintln!("{failure}");
-        return failure.exit_code();
-    }
-
-    let runner = match SecureProcessRunner::for_authmux() {
-        Ok(runner) => runner,
-        Err(failure) => {
-            eprintln!("{failure}");
-            return 2;
-        }
-    };
-    match runner.run(command, &execution_selection) {
-        Ok(outcome) => match (outcome.exit_code(), outcome.signal()) {
-            (Some(exit_code), None) => exit_code,
-            (None, Some(signal)) => terminate_with_signal(signal),
-            _ => 126,
-        },
-        Err(failure) => {
-            eprintln!("{failure}");
-            exit_code(&failure)
         }
     }
 }
@@ -845,7 +669,6 @@ fn show_status(
         ProviderSelection::Ssh => ssh_status_report(&definition)
             .map(|(report, transport_reuse)| (report, Some(transport_reuse))),
         ProviderSelection::Gcp => gcp_status_report(&definition).map(|report| (report, None)),
-        ProviderSelection::Github => github_status_report(&definition).map(|report| (report, None)),
     };
     let (report, transport_reuse) = match report {
         Ok(report) => report,
@@ -891,7 +714,6 @@ fn show_all_status(format: ReportFormat) -> i32 {
                 ProviderSelection::Aws => aws_status_report(definition),
                 ProviderSelection::Ssh => ssh_status_report(definition).map(|(report, _)| report),
                 ProviderSelection::Gcp => gcp_status_report(definition),
-                ProviderSelection::Github => github_status_report(definition),
             };
             match report {
                 Ok(report) => reports.push(report),
@@ -918,10 +740,6 @@ fn configured_providers(definition: &ContextDefinition) -> Vec<ProviderSelection
     [
         definition.aws().is_some().then_some(ProviderSelection::Aws),
         definition.gcp().is_some().then_some(ProviderSelection::Gcp),
-        definition
-            .github()
-            .is_some()
-            .then_some(ProviderSelection::Github),
         definition.ssh().is_some().then_some(ProviderSelection::Ssh),
     ]
     .into_iter()
@@ -1036,27 +854,6 @@ fn gcp_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32
     })
 }
 
-fn github_status_report(definition: &ContextDefinition) -> Result<StatusReport, i32> {
-    let Some(profile) = definition.github() else {
-        eprintln!("GitHub Provider Profile is not configured");
-        return Err(2);
-    };
-    let runner = SecureProcessRunner::for_authmux().map_err(|failure| {
-        eprintln!("{failure}");
-        2
-    })?;
-    let observation = GithubStatus::new(runner)
-        .observe(profile)
-        .map_err(|failure| {
-            eprintln!("provider status failed: {failure}");
-            5
-        })?;
-    StatusReport::github(definition.name(), profile, &observation).map_err(|failure| {
-        eprintln!("could not render status: {failure}");
-        5
-    })
-}
-
 fn show_doctor(
     selection: ContextSelection,
     provider: Option<ProviderSelection>,
@@ -1122,7 +919,6 @@ fn resolve_doctor_provider(
             ProviderSelection::Aws => definition.aws().is_some(),
             ProviderSelection::Ssh => definition.ssh().is_some(),
             ProviderSelection::Gcp => definition.gcp().is_some(),
-            ProviderSelection::Github => definition.github().is_some(),
         };
         return configured.then_some(provider).ok_or_else(|| {
             "requested authentication context does not define the selected provider".to_owned()
@@ -1133,10 +929,6 @@ fn resolve_doctor_provider(
         definition.aws().is_some().then_some(ProviderSelection::Aws),
         definition.ssh().is_some().then_some(ProviderSelection::Ssh),
         definition.gcp().is_some().then_some(ProviderSelection::Gcp),
-        definition
-            .github()
-            .is_some()
-            .then_some(ProviderSelection::Github),
     ]
     .into_iter()
     .flatten()
@@ -1160,7 +952,6 @@ fn resolve_status_provider(
             ProviderSelection::Aws => definition.aws().is_some(),
             ProviderSelection::Ssh => definition.ssh().is_some(),
             ProviderSelection::Gcp => definition.gcp().is_some(),
-            ProviderSelection::Github => definition.github().is_some(),
         };
         return configured.then_some(provider).ok_or_else(|| {
             "requested authentication context does not define the selected provider".to_owned()
@@ -1171,10 +962,6 @@ fn resolve_status_provider(
         definition.aws().is_some().then_some(ProviderSelection::Aws),
         definition.ssh().is_some().then_some(ProviderSelection::Ssh),
         definition.gcp().is_some().then_some(ProviderSelection::Gcp),
-        definition
-            .github()
-            .is_some()
-            .then_some(ProviderSelection::Github),
     ]
     .into_iter()
     .flatten()
@@ -1198,7 +985,6 @@ fn resolve_login_provider(
             ProviderSelection::Aws => definition.aws().is_some(),
             ProviderSelection::Ssh => definition.ssh().is_some(),
             ProviderSelection::Gcp => definition.gcp().is_some(),
-            ProviderSelection::Github => definition.github().is_some(),
         };
         return configured.then_some(provider).ok_or_else(|| {
             "requested authentication context does not define the selected provider".to_owned()
@@ -1209,10 +995,6 @@ fn resolve_login_provider(
         definition.aws().is_some().then_some(ProviderSelection::Aws),
         definition.ssh().is_some().then_some(ProviderSelection::Ssh),
         definition.gcp().is_some().then_some(ProviderSelection::Gcp),
-        definition
-            .github()
-            .is_some()
-            .then_some(ProviderSelection::Github),
     ]
     .into_iter()
     .flatten()
@@ -1257,14 +1039,6 @@ fn diagnose_provider(
             let home = env::var_os("HOME").ok_or_else(|| "GCP doctor requires HOME".to_owned())?;
             Ok(GcpDoctor::new(PathBuf::from(home), env::var_os("PATH"))
                 .diagnose(definition.name(), profile))
-        }
-        ProviderSelection::Github => {
-            let profile = definition
-                .github()
-                .ok_or_else(|| "GitHub Provider Profile is not configured".to_owned())?;
-            let runner =
-                SecureProcessRunner::for_authmux().map_err(|failure| failure.to_string())?;
-            Ok(GithubDoctor::new(runner).diagnose(definition.name(), profile))
         }
     }
 }
@@ -1316,10 +1090,6 @@ fn print_context(
             println!("ADC mode: credential_file");
             println!("expected ADC identity: {}", adc.expected_principal());
         }
-    }
-    if let Some(github) = definition.github() {
-        println!("GitHub hostname: {}", github.hostname());
-        println!("expected GitHub login: {}", github.expected_login());
     }
     println!("provider state: not observed");
 }
@@ -1396,7 +1166,6 @@ enum ProviderSelection {
     Aws,
     Ssh,
     Gcp,
-    Github,
 }
 
 impl ProviderSelection {
@@ -1405,7 +1174,6 @@ impl ProviderSelection {
             Self::Aws => "aws",
             Self::Ssh => "ssh",
             Self::Gcp => "gcp",
-            Self::Github => "github",
         }
     }
 }
@@ -1478,7 +1246,6 @@ fn parse_command(arguments: Vec<OsString>) -> Result<CliCommand, String> {
             })
         }
         Some("aws") => parse_login_shortcut(&arguments, ProviderSelection::Aws),
-        Some("gh") => parse_login_shortcut(&arguments, ProviderSelection::Github),
         Some("gcloud") => parse_login_shortcut(&arguments, ProviderSelection::Gcp),
         Some("empireai") => parse_login_shortcut(&arguments, ProviderSelection::Ssh),
         Some("doctor") => {
@@ -1554,7 +1321,6 @@ fn parse_login(
                     Some("aws") => Some(ProviderSelection::Aws),
                     Some("gcp") => Some(ProviderSelection::Gcp),
                     Some("ssh") => Some(ProviderSelection::Ssh),
-                    Some("github") => Some(ProviderSelection::Github),
                     _ => return Err(USAGE.to_owned()),
                 };
                 index += 2;
@@ -1692,7 +1458,6 @@ fn parse_status(
                     Some("aws") => Some(ProviderSelection::Aws),
                     Some("gcp") => Some(ProviderSelection::Gcp),
                     Some("ssh") => Some(ProviderSelection::Ssh),
-                    Some("github") => Some(ProviderSelection::Github),
                     _ => return Err(USAGE.to_owned()),
                 };
                 index += 2;
@@ -1749,7 +1514,6 @@ fn parse_doctor(
                     Some("aws") => Some(ProviderSelection::Aws),
                     Some("gcp") => Some(ProviderSelection::Gcp),
                     Some("ssh") => Some(ProviderSelection::Ssh),
-                    Some("github") => Some(ProviderSelection::Github),
                     _ => return Err(USAGE.to_owned()),
                 };
                 index += 2;

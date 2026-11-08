@@ -18,7 +18,7 @@
     "context": { "type": "string", "minLength": 1, "maxLength": 512 },
     "provider": {
       "type": "string",
-      "enum": ["aws", "github"]
+      "enum": ["aws"]
     },
     "login_argv": {
       "type": "array",
@@ -29,7 +29,7 @@
         { "const": "login" },
         { "type": "string", "minLength": 1, "maxLength": 512 },
         { "const": "--provider" },
-        { "enum": ["aws", "github"] },
+        { "enum": ["aws"] },
         { "const": "--print-command" }
       ],
       "items": false

@@ -1,6 +1,6 @@
 # ADR 0010: Isolate GitHub CLI with native configuration directories
 
-- Status: Accepted
+- Status: Superseded by ADR 0014 (2026-11-08)
 - Date: 2026-08-05
 
 ## Context

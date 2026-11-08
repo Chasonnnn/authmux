@@ -6,7 +6,7 @@ status: accepted
 
 `authmux` will orchestrate native authentication tools instead of storing,
 issuing, brokering, or synchronizing credentials itself. This keeps AWS,
-Google Cloud, GitHub, SSH, and future providers responsible for their own
+Google Cloud, SSH, and future providers responsible for their own
 security-sensitive state while `authmux` supplies normalized status,
 user-initiated reauthentication, project binding, and process-scoped
 selection. The trade-off is that provider behavior cannot be perfectly

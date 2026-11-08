@@ -28,7 +28,6 @@ struct ProviderConfigs {
     aws: Option<AwsConfig>,
     ssh: Option<SshConfig>,
     gcp: Option<GcpConfig>,
-    github: Option<GithubConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,14 +70,6 @@ struct GcpAdcConfig {
     expected_principal: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GithubConfig {
-    config_dir: PathBuf,
-    hostname: String,
-    expected_login: String,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum GcpAdcMode {
@@ -113,7 +104,6 @@ pub struct ContextDefinition {
     aws: Option<AuthenticationContext>,
     ssh: Option<SshProviderDefinition>,
     gcp: Option<GcpProviderDefinition>,
-    github: Option<GithubProviderDefinition>,
     description: Option<String>,
 }
 
@@ -145,13 +135,6 @@ pub struct GcpAdcProviderDefinition {
     expected_principal: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GithubProviderDefinition {
-    config_dir: PathBuf,
-    hostname: String,
-    expected_login: String,
-}
-
 impl ContextDefinition {
     #[must_use]
     pub fn name(&self) -> &str {
@@ -171,11 +154,6 @@ impl ContextDefinition {
     #[must_use]
     pub fn gcp(&self) -> Option<&GcpProviderDefinition> {
         self.gcp.as_ref()
-    }
-
-    #[must_use]
-    pub fn github(&self) -> Option<&GithubProviderDefinition> {
-        self.github.as_ref()
     }
 
     #[must_use]
@@ -266,52 +244,6 @@ impl GcpAdcProviderDefinition {
     }
 }
 
-impl GithubProviderDefinition {
-    #[must_use]
-    pub fn config_dir(&self) -> &Path {
-        &self.config_dir
-    }
-
-    #[must_use]
-    pub fn hostname(&self) -> &str {
-        &self.hostname
-    }
-
-    #[must_use]
-    pub fn expected_login(&self) -> &str {
-        &self.expected_login
-    }
-
-    #[must_use]
-    pub fn execution_selection(&self) -> ExecutionSelection {
-        ExecutionSelection::from_environment(vec![
-            (
-                "GH_CONFIG_DIR".into(),
-                self.config_dir.as_os_str().to_owned(),
-            ),
-            ("GH_HOST".into(), self.hostname.clone().into()),
-            ("GH_NO_UPDATE_NOTIFIER".into(), "1".into()),
-            ("GH_NO_EXTENSION_UPDATE_NOTIFIER".into(), "1".into()),
-            ("GH_PROMPT_DISABLED".into(), "1".into()),
-            ("GH_TELEMETRY".into(), "false".into()),
-        ])
-    }
-
-    #[must_use]
-    pub fn login_selection(&self) -> ExecutionSelection {
-        ExecutionSelection::from_environment(vec![
-            (
-                "GH_CONFIG_DIR".into(),
-                self.config_dir.as_os_str().to_owned(),
-            ),
-            ("GH_HOST".into(), self.hostname.clone().into()),
-            ("GH_NO_UPDATE_NOTIFIER".into(), "1".into()),
-            ("GH_NO_EXTENSION_UPDATE_NOTIFIER".into(), "1".into()),
-            ("GH_TELEMETRY".into(), "false".into()),
-        ])
-    }
-}
-
 impl SshProviderDefinition {
     #[must_use]
     pub fn host_alias(&self) -> &str {
@@ -384,10 +316,10 @@ impl ProjectBinding {
             .project
             .providers
             .keys()
-            .any(|provider| !matches!(provider.as_str(), "aws" | "gcp" | "github" | "ssh"))
+            .any(|provider| !matches!(provider.as_str(), "aws" | "gcp" | "ssh"))
         {
             return Err(ConfigFailure::new(
-                "project provider mapping is invalid; use aws, gcp, github, or ssh",
+                "project provider mapping is invalid; use aws, gcp, or ssh",
             ));
         }
         for context in
@@ -447,8 +379,11 @@ impl UserConfig {
     /// Returns a sanitized failure for malformed, unsupported, or
     /// secret-shaped configuration.
     pub fn parse(source: &str) -> Result<Self, ConfigFailure> {
-        let config = toml::from_str::<Self>(source)
-            .map_err(|_| ConfigFailure::new("user configuration is invalid"))?;
+        let config = toml::from_str::<Self>(source).map_err(|_| {
+            ConfigFailure::new(
+                "user configuration is invalid; supported providers are aws, gcp, and ssh",
+            )
+        })?;
         if config.version != 1 {
             return Err(ConfigFailure::new(
                 "unsupported user configuration version; expected version 1",
@@ -540,7 +475,6 @@ impl UserConfig {
         if context.providers.aws.is_none()
             && context.providers.ssh.is_none()
             && context.providers.gcp.is_none()
-            && context.providers.github.is_none()
         {
             return Err(ConfigFailure::new(
                 "authentication context must define at least one provider",
@@ -585,22 +519,12 @@ impl UserConfig {
                     }
                 }),
             });
-        let github = context
-            .providers
-            .github
-            .as_ref()
-            .map(|github| GithubProviderDefinition {
-                config_dir: github.config_dir.clone(),
-                hostname: github.hostname.clone(),
-                expected_login: github.expected_login.clone(),
-            });
 
         Ok(ContextDefinition {
             name: context_name.to_owned(),
             aws,
             ssh,
             gcp,
-            github,
             description: context.description.clone(),
         })
     }
@@ -829,51 +753,8 @@ fn validate_gcp_provider_configs(config: &UserConfig) -> Result<(), ConfigFailur
     Ok(())
 }
 
-fn valid_github_hostname(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 255
-        && value.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
-}
-
-fn validate_github_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
-    if config.contexts.values().any(|context| {
-        context.providers.github.as_ref().is_some_and(|github| {
-            looks_secret_shaped(&github.hostname)
-                || looks_secret_shaped(&github.expected_login)
-                || gcp_provider_path_looks_secret_shaped(&github.config_dir)
-        })
-    }) {
-        return Err(ConfigFailure::new(
-            "user configuration contains secret-shaped GitHub metadata",
-        ));
-    }
-    if config.contexts.values().any(|context| {
-        context.providers.github.as_ref().is_some_and(|github| {
-            !valid_gcp_provider_path(&github.config_dir)
-                || !valid_github_hostname(&github.hostname)
-                || github.expected_login.trim().is_empty()
-                || github.expected_login.trim() != github.expected_login
-                || has_unsafe_display_characters(&github.expected_login)
-        })
-    }) {
-        return Err(ConfigFailure::new(
-            "user configuration contains invalid GitHub Provider Profile metadata",
-        ));
-    }
-    Ok(())
-}
-
 fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
     validate_gcp_provider_configs(config)?;
-    validate_github_provider_configs(config)?;
     if config.contexts.values().any(|context| {
         context
             .providers
@@ -953,7 +834,6 @@ fn validate_provider_configs(config: &UserConfig) -> Result<(), ConfigFailure> {
         context.providers.aws.is_none()
             && context.providers.ssh.is_none()
             && context.providers.gcp.is_none()
-            && context.providers.github.is_none()
     }) {
         return Err(ConfigFailure::new(
             "authentication context must define at least one provider",

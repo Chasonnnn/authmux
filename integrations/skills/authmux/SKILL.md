@@ -1,6 +1,6 @@
 ---
 name: authmux
-description: Route authenticated AWS, Google Cloud, GitHub CLI, and SSH work through a repository-bound authmux context with one guarded execution path and an external-terminal handoff for interactive login.
+description: Route authenticated AWS, Google Cloud, and SSH work through a repository-bound authmux context with one guarded execution path and an external-terminal handoff for interactive login.
 ---
 
 # Authmux
@@ -14,8 +14,8 @@ the operating system retain credential custody.
 2. In an unfamiliar repository, or after its working directory, Project
    Binding, or user configuration changes, run `authmux context show` once.
    Otherwise do not repeat it.
-3. For `gh`, select the GitHub context under **GitHub CLI** below. For other
-   providers, run the requested leaf operation through `authmux exec -- ...`.
+3. For AWS and Google Cloud, run the requested leaf operation through
+   `authmux exec -- ...`.
    If the repo declares a separate login context for that provider, select it
    explicitly with `--context CONTEXT` for the operation; mappings do not
    automatically route `exec`, `status`, or `doctor`.
@@ -33,12 +33,10 @@ Examples:
 authmux exec -- aws s3 ls
 authmux exec -- terraform plan
 authmux exec -- gcloud projects describe PROJECT_ID
-authmux exec --context GITHUB_CONTEXT -- gh pr list
 ```
 
 Use `--context CONTEXT` when the repository mapping, repository instructions,
-or user identifies that context, or for GitHub selection below. Never guess a
-context from a shortcut name.
+or user identifies that context. Never guess a context from a shortcut name.
 
 ## Repo login shortcuts
 
@@ -47,7 +45,6 @@ For explicit login requests, use the configured repo's shortcut:
 | Command | Provider | Repo mapping |
 |---|---|---|
 | `authmux aws` | AWS | `project.providers.aws` |
-| `authmux gh` | GitHub | `project.providers.github` |
 | `authmux gcloud` | GCP | `project.providers.gcp` |
 | `authmux empireai` | SSH | `project.providers.ssh` |
 
@@ -66,7 +63,6 @@ version = 1
 context = "research"
 [project.providers]
 aws = "research"
-github = "github"
 ssh = "empire"
 ```
 
@@ -85,39 +81,10 @@ for recovery below.
 
 ## GitHub CLI
 
-GitHub PRs, reviews, checks, Actions, and repository API calls require GitHub
-authentication. An AWS or GCP Project Binding does not make cloud login a
-prerequisite for these operations.
-
-- If `project.providers.github` is declared, use that GitHub-only context with
-  `--context` before the first operation. A missing or incompatible mapped
-  context stops the operation; do not fall back to discovery.
-- Otherwise use the default bound context when it is GitHub-only.
-- If neither applies, inspect `authmux context list --json` once. When exactly one
-  GitHub-only context matches the target host and repository instructions do
-  not require another GitHub identity, use it explicitly:
-  `authmux exec --context GITHUB_CONTEXT -- gh ...`. Keep the repository
-  working directory and requested `gh` arguments.
-- If the required GitHub identity is unclear or no matching context exists,
-  ask for the GitHub context. Do not change the cloud binding or substitute
-  ambient authentication.
-- Select the GitHub context before the first `gh` run, never after a failure.
-- Never request AWS, GCP, or SSH login to unblock a `gh` operation. An older
-  authmux may emit an AWS Reauthentication event when `gh` ran under an AWS
-  context; reject that mismatched event and run the same `gh` argv once under
-  the GitHub context selected above. This is the only cross-context retry the
-  command boundaries below allow.
-
-If guarded execution reports unverified GitHub system credential storage,
-check whether the execution environment restricts credential-store access.
-When it does, request scoped access for the exact guarded command and retry
-once. Stop if that retry fails. Do not rerun unchanged restricted commands,
-request login from this diagnostic alone, or weaken secure-storage checks.
-A confirmed plaintext-storage diagnostic requires native secure-storage repair
-in a separate terminal app before another guarded attempt.
-
-Mixed-provider execution remains unsupported. Selecting an existing GitHub-only
-context keeps its Expected Identity and credential-store guard in force.
+Run `gh` directly with its native authentication. Authmux does not manage GitHub.
+Do not select an authmux context or request cloud login for GitHub operations.
+For interactive GitHub login, use a separate terminal app outside captured
+agent sessions. Never request tokens or captured login output.
 
 ## Interactive reauthentication
 
@@ -177,12 +144,11 @@ selector contract and does not manage Git authentication.
   inactive required SSH transport with a bare provider command or ambient
   selector.
 - Preserve child exit codes and do not retry through another context or
-  identity, except the single `gh` retry under **GitHub CLI**.
+  identity.
 
 ## Provider boundaries
 
-- AWS, Google Cloud, and GitHub use guarded `authmux exec` paths. GitHub accepts
-  `gh`, not raw Git authentication.
+- AWS and Google Cloud use guarded `authmux exec` paths.
 - SSH has no generic `exec` path. Before automated SSH work, require
   `authmux status --context CONTEXT --provider ssh --require-active-transport`,
   selecting the repo's `project.providers.ssh` context when declared; after it

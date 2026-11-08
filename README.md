@@ -69,8 +69,8 @@ authmux aws --print-command
 authmux aws --context crm
 ```
 
-`authmux aws`, `authmux gh`, `authmux gcloud`, and `authmux empireai` start
-explicit AWS, GitHub, Google Cloud, and SSH login respectively. Each accepts
+`authmux aws`, `authmux gcloud`, and `authmux empireai` start
+explicit AWS, Google Cloud, and SSH login respectively. Each accepts
 `--context NAME` and `--print-command`. Selection uses the explicit context,
 then the repo's matching `project.providers` entry, then `project.context`
 when no provider mapping exists. Missing contexts or providers fail without
@@ -99,39 +99,10 @@ user confirms completion, retry the original guarded command; do not add a
 routine `status` round trip. Recovery is complete only when the original guarded
 operation succeeds. Native login success leaves that operation pending.
 
-GitHub uses a user-owned native configuration directory and the system
-credential store:
-
-```toml
-[contexts.github.providers.github]
-config_dir = "/home/researcher/.config/gh/research"
-hostname = "github.com"
-expected_login = "fictional-researcher"
-```
-
-```console
-authmux status --context github --provider github
-authmux doctor --context github --provider github
-authmux login github --provider github
-authmux exec --context github -- gh pr list
-```
-
-Status contacts GitHub through `gh auth status` without requesting or printing
-a token. Guarded execution validates the active login, then applies
-`GH_CONFIG_DIR` and `GH_HOST` only to the child. Ambient GitHub token variables
-are removed. Authmux rejects GitHub CLI plaintext-token fallback; configure a
-supported system credential store instead. An unverified storage source can also
-reflect restricted credential-store access. When that restriction is known,
-request scoped access for the exact guarded command and retry once. Stop if
-the retry fails. This diagnostic alone does not justify another login.
-GitHub execution accepts only `gh`;
-raw `git` authentication is not selected by `GH_CONFIG_DIR` and fails closed.
-
-For GitHub work inside a repository bound to AWS or GCP, select a configured
-GitHub-only context explicitly, as above. `authmux context list --json` shows
-the declared providers and Expected Identities without contacting them. A `gh`
-command with no GitHub Provider Profile fails before any provider probe; cloud
-login cannot unblock it. The repository's cloud binding stays in place.
+GitHub CLI runs directly with native authentication. Authmux does not manage
+GitHub contexts, login, status, or execution. Wrapped `gh` commands fail before
+configuration loading or cloud probes. See the
+[GitHub removal migration](docs/migrations/remove-github-provider.md) for existing setups.
 
 JSON output follows the checked-in, versioned
 [`status-v3` schema](docs/schemas/status-v3.schema.json). Human and JSON reports
@@ -162,7 +133,7 @@ preflights for guarded execution.
 
 Native providers may renew their own credentials during an explicitly requested
 guarded operation. Authmux does not run a refresh timer or background daemon.
-When an AWS or GitHub preflight can safely establish that interactive
+When an AWS preflight can safely establish that interactive
 Reauthentication is required, `exec` exits `10` and writes one compact JSON
 event to stderr:
 
@@ -183,7 +154,6 @@ Continuity remains provider-specific:
 |---|---|
 | AWS | The native CLI may renew Credentials during the guarded STS preflight. Recognized expired or missing Sessions emit the structured event. Endpoint failures request network access without suggesting Reauthentication. |
 | Google Cloud | The gcloud or ADC child owns refresh. Authmux does not capture arbitrary child output or claim that a generic child failure is Reauthentication. |
-| GitHub | An unusable provider-validated Session emits the structured event; Reauthentication remains interactive. |
 | SSH | OpenSSH owns transport reuse. A keepalive or ControlMaster is not Credential renewal and can lapse independently. |
 
 Deployment and log-monitoring loops expected to outlive a human Session should
@@ -303,19 +273,6 @@ cargo test --test live_gcp -- --ignored --exact \
 The native login inherits the terminal and may open a browser. The test does
 not capture its output, authorization URL, or input.
 
-The GitHub live gate validates the configured login and runs one read-only API
-request through guarded execution:
-
-```console
-AUTHMUX_LIVE_GITHUB_CONTEXT=github \
-AUTHMUX_LIVE_GITHUB_ACKNOWLEDGE_PROVIDER_CONTACT=1 \
-cargo test --test live_github -- --ignored --exact \
-  configured_github_context_completes_the_live_cli_workflow
-```
-
-It never invokes `gh auth token` or `--show-token`; captured output is not
-printed by the test.
-
 Empire AI work begins with an OpenSSH client readiness check that does not read
 SSH configuration, inspect an agent, resolve or contact a host, or trigger MFA.
 Run its opt-in local gate with:
@@ -380,8 +337,8 @@ credential_file = "/home/researcher/.config/gcloud/adc/crm.json"
 expected_principal = "workload@example.test"
 ```
 
-Existing version 1 bindings remain valid. The optional root binding can map
-login providers to separate existing contexts:
+Version 1 bindings without GitHub settings remain valid. The optional root
+binding can map login providers to separate existing contexts:
 
 ```toml
 version = 1
@@ -391,12 +348,11 @@ context = "crm"
 
 [project.providers]
 aws = "crm"
-github = "github"
 ssh = "empire"
 ```
 
 `project.context` is required and remains the default for existing commands.
-The optional `project.providers` keys are `aws`, `gcp`, `github`, and `ssh`;
+The optional `project.providers` keys are `aws`, `gcp`, and `ssh`;
 their values are context names, not profiles, credentials, or commands.
 `authmux context show` includes these mappings without contacting providers.
 Upgrade authmux before adding this table: older binaries reject the new
@@ -433,8 +389,8 @@ skill directories without changing how the agent runtime discovers them.
 ## Current state
 
 The crate now contains AWS identity guards, independent gcloud CLI and ADC
-selection observations, GitHub provider validation and isolated execution, SSH
-local transport observation, aggregate all-context status, bounded provider
+selection observations, SSH local transport observation, aggregate all-context
+status, bounded provider
 probes, strict configuration parsing, and isolated child execution. It remains
 a development tracer rather than a released CLI. CI runs the same format,
 strict lint, test, and locked build gates on pinned Ubuntu and macOS runners.

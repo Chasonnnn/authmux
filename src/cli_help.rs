@@ -1,15 +1,15 @@
 use std::ffi::OsString;
 
 pub const TOP_USAGE: &str =
-    "usage: authmux <exec|context|doctor|login|status|aws|gh|gcloud|empireai> ...";
+    "usage: authmux <exec|context|doctor|login|status|aws|gcloud|empireai> ...";
 pub const EXEC_USAGE: &str = "usage: authmux exec [--context <context>] -- <program> [args...]";
 pub const LOGIN_USAGE: &str =
-    "usage: authmux login <context> [--provider <aws|gcp|github|ssh>] [--print-command]";
+    "usage: authmux login <context> [--provider <aws|gcp|ssh>] [--print-command]";
 pub const SHORTCUT_USAGE: &str =
-    "usage: authmux <aws|gh|gcloud|empireai> [--context <context>] [--print-command]";
-pub const STATUS_USAGE: &str = "usage: authmux status [--all | --context <context>] [--provider <aws|gcp|github|ssh>] [--json] [--require-active-transport]";
+    "usage: authmux <aws|gcloud|empireai> [--context <context>] [--print-command]";
+pub const STATUS_USAGE: &str = "usage: authmux status [--all | --context <context>] [--provider <aws|gcp|ssh>] [--json] [--require-active-transport]";
 pub const DOCTOR_USAGE: &str =
-    "usage: authmux doctor [--context <context>] [--provider <aws|gcp|github|ssh>] [--json]";
+    "usage: authmux doctor [--context <context>] [--provider <aws|gcp|ssh>] [--json]";
 pub const CONTEXT_USAGE: &str = "usage: authmux context <list|show> ...";
 pub const CONTEXT_LIST_USAGE: &str = "usage: authmux context list [--json]";
 pub const CONTEXT_SHOW_USAGE: &str = "usage: authmux context show [--context <context>]";
@@ -31,7 +31,7 @@ pub fn render(arguments: &[OsString]) -> Option<String> {
              status     Observe provider identity and session evidence.\n\
              doctor     Diagnose local configuration and CLI availability.\n\
              login      Delegate explicit login to a native provider.\n\
-             aws, gh, gcloud, empireai  Log in using a repo provider mapping.\n\n\
+             aws, gcloud, empireai  Log in using a repo provider mapping.\n\n\
              --version, -V  Print the installed package version.",
         ),
         "exec" => (
@@ -46,9 +46,9 @@ pub fn render(arguments: &[OsString]) -> Option<String> {
              --print-command  Preview login without starting the native command.\n\
              Run interactive login in a separate terminal app, outside captured agent sessions.",
         ),
-        "aws" | "gh" | "gcloud" | "empireai" => (
+        "aws" | "gcloud" | "empireai" => (
             SHORTCUT_USAGE,
-            "aws = AWS; gh = GitHub; gcloud = GCP; empireai = SSH.\n\
+            "aws = AWS; gcloud = GCP; empireai = SSH.\n\
              --context NAME   Override the repo provider mapping and default context.\n\
              --print-command  Preview login without starting the native command.\n\
              Shortcuts log in only. Use exec for guarded provider commands.",

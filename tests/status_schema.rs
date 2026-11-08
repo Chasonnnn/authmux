@@ -17,7 +17,7 @@ fn checked_in_execution_event_schema_is_valid_json() {
     );
     assert_eq!(
         schema["properties"]["provider"]["enum"],
-        serde_json::json!(["aws", "github"])
+        serde_json::json!(["aws"])
     );
     assert_eq!(
         schema["properties"]["login_argv"]["prefixItems"][5]["const"],

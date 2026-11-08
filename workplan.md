@@ -54,16 +54,15 @@ machine and already uses the providers' supported CLIs.
 - One cross-platform Rust binary for macOS and Linux.
 - User configuration plus optional repository-local `.authmux.toml`.
 - Commands: `status`, `doctor`, `login`, `exec`, `context list`, and
-  `context show`, plus `aws`, `gh`, `gcloud`, and `empireai` login shortcuts.
+  `context show`, plus `aws`, `gcloud`, and `empireai` login shortcuts.
 - Normalized status model with observation time and evidence level.
 - Initial Provider Adapters:
   - AWS via supported `aws` profile/session commands.
   - Google Cloud after the AWS vertical slice proves the Interface, with gcloud
     CLI configuration and Application Default Credentials treated as separate
     credential planes and observed independently.
-- GitHub CLI status, login, and guarded execution through user-owned
-  `GH_CONFIG_DIR` selectors and system credential-store custody. Empire AI enters 0.1 through
-  bounded OpenSSH local readiness and explicit native SSH login delegation; it
+- Empire AI enters 0.1 through bounded OpenSSH local readiness and explicit
+  native SSH login delegation; it
   gains no remote status or execution selection unless a later gate proves
   those behaviors without copying credentials, executing user configuration
   from a read-only command, or mutating global state.
@@ -122,7 +121,7 @@ or a Credential.
 authmux status [--all | --context NAME] [--provider NAME] [--json] [--require-active-transport]
 authmux doctor [--context NAME] [--provider NAME] [--json]
 authmux login <context> [--provider NAME] [--print-command]
-authmux <aws|gh|gcloud|empireai> [--context NAME] [--print-command]
+authmux <aws|gcloud|empireai> [--context NAME] [--print-command]
 authmux exec [--context NAME] -- <program> [args...]
 authmux context list [--json]
 authmux context show [--context NAME]
@@ -157,9 +156,9 @@ Behavioral rules:
   normal work path and does not require a preceding `status` or `doctor` call.
   A safely classified interactive Reauthentication requirement exits `10` with
   one `exec-event-v1` JSON object on stderr; it never starts login implicitly.
-- `gh` requires a GitHub Provider Profile before any provider observation.
-  Cloud-bound repositories use an explicit configured GitHub-only context for
-  GitHub operations; missing GitHub selection must never request cloud login.
+- GitHub CLI runs directly with native authentication. Wrapped `gh` commands
+  fail before configuration loading or provider observation. GitHub profiles
+  and project mappings are rejected. See ADR 0014 and its migration notes.
 - `--json` has a versioned schema and contains sanitized structured data only.
 
 ## 7. Configuration sketch
@@ -207,7 +206,6 @@ context = "crm"
 
 [project.providers]
 aws = "crm"
-github = "github"
 ssh = "empire"
 ```
 
@@ -444,8 +442,7 @@ Deliverables:
   filtered environment inheritance, and no capture of MFA input or native
   output; leave `ControlMaster` and `ControlPersist` under user-owned OpenSSH
   configuration per ADR 0004.
-- [x] Refuse unsafe global switching by default; GitHub selection uses
-  `GH_CONFIG_DIR` and never runs `gh auth switch`.
+- [x] Refuse unsafe global switching by default; use process-scoped selectors.
 - [x] Add cross-context concurrency tests and hostile argument tests.
 
 Exit criteria:
@@ -463,8 +460,7 @@ Exit criteria:
 
 Deliverables:
 
-- [x] Implement `login` plans for all initial providers: AWS, GCP, GitHub, and
-  SSH.
+- [x] Implement `login` plans for supported providers: AWS, GCP, and SSH.
 - [x] Add repo-bound provider login shortcuts with separate context mappings,
   explicit-context precedence, sanitized configuration failures, and
   pre-spawn mapping revalidation.
@@ -478,9 +474,9 @@ Deliverables:
   mutation.
 - [x] Support SSH interactive terminal handoff without capturing secrets.
 - [x] Add a non-executing, external-terminal login handoff for AWS, GCP,
-  GitHub, and SSH so captured agent sessions do not own native login output.
-- [x] Add `exec-event-v1` and exit code `10` for safely classified AWS and
-  GitHub Reauthentication, preserving one exact-command retry for agents.
+  and SSH so captured agent sessions do not own native login output.
+- [x] Add `exec-event-v1` and exit code `10` for safely classified AWS
+  Reauthentication, preserving one exact-command retry for agents.
 - [x] Report each provider's honest continuity boundary through `doctor`
   without adding provider contact or reading Credential caches.
 - [x] Re-observe protected local SSH Transport Reuse after successful native
@@ -524,6 +520,33 @@ Local validation completed:
   with symlinked directories, spaces in paths, and retained runtime metadata.
 - The installed binary matches the release build. Installed Codex and Claude
   skills match the authoritative copy. Installed help and version probes pass.
+
+### GitHub removal — November 8, 2026
+
+Acceptance criteria:
+
+- Remove GitHub Provider Profiles, selectors, probes, login, and execution paths.
+- Remove the `gh` shortcut and `--provider github` from commands and help.
+- Reject old user profiles and project mappings with sanitized configuration errors.
+- Reject wrapped `gh` commands before configuration loading or cloud probes.
+- Keep GitHub token detection and ambient-secret filtering for supported providers.
+- Preserve aggregate status and partial-failure coverage with AWS and SSH fixtures.
+- Update canonical docs, event schema, migration notes, and agent routing guidance.
+- Pass formatting, strict Clippy, all-feature tests, and the locked build.
+
+Historical GitHub research and October validation records describe the retired
+implementation. ADR 0014 supersedes that provider scope.
+
+Local validation completed:
+
+- Removal regression tests failed before implementation and passed afterward.
+- Pinned Mise installation, formatting, strict Clippy, all-feature tests, and
+  the locked build passed. Opt-in live provider tests remained ignored.
+- The built CLI rejects wrapped `gh` before configuration loading and omits
+  GitHub from command help. Aggregate status retains successful observations.
+- Installed Codex and Claude skills match the authoritative routing guidance.
+- The installed binary and existing user and repository configurations were
+  not migrated.
 
 ### Phase 4 — hardening and live workflow release gate
 

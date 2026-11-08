@@ -8,12 +8,12 @@ provider's custody.
 
 **Provider**:
 An authentication system whose native CLI or agent owns a developer session,
-such as AWS, Google Cloud, GitHub, or SSH.
+such as AWS, Google Cloud, or SSH.
 _Avoid_: Integration, backend
 
 **Provider Identity**:
 A human-recognizable identity within one provider, such as an AWS role, Google
-account, GitHub user, or SSH key label.
+account or SSH key label.
 _Avoid_: Account when the provider-specific meaning is unclear
 
 **Provider Profile**:

@@ -22,7 +22,6 @@ fn help_works_without_configuration_or_provider_contact() {
         vec!["context", "list", "--help"],
         vec!["context", "show", "--help"],
         vec!["aws", "--help"],
-        vec!["gh", "--help"],
         vec!["gcloud", "--help"],
         vec!["empireai", "--help"],
     ] {
@@ -31,7 +30,57 @@ fn help_works_without_configuration_or_provider_contact() {
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert!(stdout.starts_with("usage: authmux "), "{arguments:?}");
         assert!(stdout.contains("--help"), "{arguments:?}");
+        assert!(!stdout.contains("github") && !stdout.contains("GitHub"));
+        assert!(!stdout.contains("|gh|") && !stdout.contains(", gh,"));
         assert!(output.stderr.is_empty(), "{arguments:?}");
+    }
+    assert!(!fixture.0.join("provider-ran").exists());
+}
+
+#[test]
+fn removed_github_commands_fail_without_configuration_or_provider_contact() {
+    let fixture = HelpFixture::new("removed-github");
+    for arguments in [
+        vec!["gh"],
+        vec!["gh", "--help"],
+        vec![
+            "login",
+            "fictional",
+            "--provider",
+            "github",
+            "--print-command",
+        ],
+        vec!["status", "--provider", "github"],
+        vec!["doctor", "--provider", "github"],
+    ] {
+        let output = fixture.run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .starts_with("usage:")
+        );
+    }
+    assert!(!fixture.0.join("provider-ran").exists());
+}
+
+#[test]
+fn wrapped_gh_fails_before_configuration_or_cloud_probes() {
+    let fixture = HelpFixture::new("wrapped-gh");
+    let executable = fixture.0.join("bin/gh");
+    for program in ["gh", executable.to_str().unwrap()] {
+        for selection in [vec!["exec"], vec!["exec", "--context", "fictional"]] {
+            let mut arguments = selection;
+            arguments.extend(["--", program, "repo", "view"]);
+            let output = fixture.run(&arguments);
+            assert_eq!(output.status.code(), Some(2));
+            assert!(output.stdout.is_empty());
+            assert_eq!(
+                String::from_utf8(output.stderr).unwrap(),
+                "GitHub CLI is not managed by authmux; run gh directly\n"
+            );
+        }
     }
     assert!(!fixture.0.join("provider-ran").exists());
 }
